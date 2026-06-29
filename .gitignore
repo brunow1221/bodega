@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Entornos locales
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Builds y artefactos generados
+build/
+dist/
+installer_output/
+*.log
+
+# Archivos generados por la aplicacion
+assets/codigos_productos/
+assets/qrs_trabajadores/
+
+# Archivos locales de editores
+.idea/
+.vscode/
+*.swp
+*.tmp
+Thumbs.db
+Desktop.ini
