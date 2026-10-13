@@ -50,8 +50,8 @@ declare
     v_codigo_ubicacion text;
     v_ubicaciones_retirar bigint[];
     v_productos_afectados integer;
-    fila integer;
-    columna integer;
+    v_fila integer;
+    v_columna integer;
 begin
     v_sesion := public.validar_sesion_app(p_token, true);
 
@@ -202,14 +202,14 @@ begin
                 raise exception 'Ya existe otro rack con el codigo %.', v_codigo;
             end if;
 
-            select array_agg(id)
+            select array_agg(u.id)
               into v_ubicaciones_retirar
-              from public.ubicaciones
-             where rack_id = v_rack_id
-               and tipo = 'Bloque'
+              from public.ubicaciones u
+             where u.rack_id = v_rack_id
+               and u.tipo = 'Bloque'
                and (
-                   substring(nivel from 2)::integer > v_niveles
-                   or substring(columna from 2)::integer > v_columnas
+                   substring(u.nivel from 2)::integer > v_niveles
+                   or substring(u.columna from 2)::integer > v_columnas
                );
 
             if v_ubicaciones_retirar is not null then
@@ -262,22 +262,22 @@ begin
     end if;
 
     if p_accion in ('crear', 'actualizar', 'reactivar') then
-        for fila in 1..v_niveles loop
-            for columna in 1..v_columnas loop
+        for v_fila in 1..v_niveles loop
+            for v_columna in 1..v_columnas loop
                 v_codigo_ubicacion :=
                     'B' || v_bodega_id || '-' || v_codigo
-                    || '-N' || lpad(fila::text, 2, '0')
-                    || '-C' || lpad(columna::text, 2, '0');
+                    || '-N' || lpad(v_fila::text, 2, '0')
+                    || '-C' || lpad(v_columna::text, 2, '0');
 
-                update public.ubicaciones
+                update public.ubicaciones as u
                    set codigo_ubicacion = v_codigo_ubicacion,
-                       nivel = 'N' || lpad(fila::text, 2, '0'),
-                       columna = 'C' || lpad(columna::text, 2, '0'),
+                       nivel = 'N' || lpad(v_fila::text, 2, '0'),
+                       columna = 'C' || lpad(v_columna::text, 2, '0'),
                        estado = 'Activo'
-                 where rack_id = v_rack_id
-                   and tipo = 'Bloque'
-                   and nivel = 'N' || lpad(fila::text, 2, '0')
-                   and columna = 'C' || lpad(columna::text, 2, '0');
+                 where u.rack_id = v_rack_id
+                   and u.tipo = 'Bloque'
+                   and u.nivel = 'N' || lpad(v_fila::text, 2, '0')
+                   and u.columna = 'C' || lpad(v_columna::text, 2, '0');
 
                 if not found then
                     insert into public.ubicaciones (
@@ -287,11 +287,11 @@ begin
                     )
                     values (
                         v_bodega_id, v_rack_id, v_codigo_ubicacion, 'Bloque',
-                        'N' || lpad(fila::text, 2, '0'),
-                        'C' || lpad(columna::text, 2, '0'),
+                        'N' || lpad(v_fila::text, 2, '0'),
+                        'C' || lpad(v_columna::text, 2, '0'),
                         null, null,
-                        v_codigo || ' N' || lpad(fila::text, 2, '0')
-                            || ' C' || lpad(columna::text, 2, '0'),
+                        v_codigo || ' N' || lpad(v_fila::text, 2, '0')
+                            || ' C' || lpad(v_columna::text, 2, '0'),
                         'Activo'
                     );
                 end if;
@@ -344,3 +344,5 @@ revoke all on function public.gestionar_rack_app(
 grant execute on function public.gestionar_rack_app(
     uuid, uuid, text, jsonb
 ) to anon, authenticated;
+
+notify pgrst, 'reload schema';

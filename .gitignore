@@ -10,6 +10,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+tablet_app/config.js
 .venv/
 venv/
 env/

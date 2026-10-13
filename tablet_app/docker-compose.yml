@@ -1,0 +1,14 @@
+services:
+  bodega-tablet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bodega-tablet:latest
+    container_name: bodega-tablet
+    restart: unless-stopped
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+    ports:
+      - "${BODEGA_TABLET_PORT:-8080}:80"
+

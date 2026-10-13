@@ -1,0 +1,8 @@
+{
+  "name": "bodega-tablet",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

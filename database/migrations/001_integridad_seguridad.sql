@@ -779,3 +779,5 @@ revoke insert, update, delete on public.transacciones from anon, authenticated;
 revoke insert, update, delete on public.racks from anon, authenticated;
 revoke insert, update, delete on public.ubicaciones from anon, authenticated;
 revoke insert, update, delete on public.auditoria from anon, authenticated;
+
+notify pgrst, 'reload schema';

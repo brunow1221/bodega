@@ -1,8 +1,6 @@
 customtkinter>=5.2.2
 supabase>=2.0.0
 Pillow>=10.0.0
-opencv-python>=4.8.0
-pyzbar>=0.1.9
-qrcode[pil]>=7.4.2
-python-barcode>=0.15.1
 pyinstaller>=6.0.0
+tzdata
+openpyxl>=3.1.0

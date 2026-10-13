@@ -1,8 +1,7 @@
 import customtkinter as ctk
 import os
-import threading
 import traceback
-from tkinter import ttk, messagebox
+from tkinter import TclError, ttk, messagebox
 
 from config import (
     KEY_SUPABASE,
@@ -13,17 +12,34 @@ from config import (
 from views.tab_consumo_proyecto import ConsumoProyectoTab
 from views.tab_mapa_bodega import MapaBodegaTab
 from database.db_manager import DatabaseManager
-from utils.barcode_utils import BarcodeGenerator
 from views.tab_salidas import SalidasTab
 from views.tab_inventario import InventarioTab
 from views.tab_terreno import TerrenoTab
 from views.tab_trabajadores import TrabajadoresTab
 from views.tab_proyectos import ProyectosTab
+from views.tab_pgp import PgpTab
+from views.tab_registro_epp import RegistroEppTab
+from views.tab_herramientas_personales import HerramientasPersonalesTab
+from views.tab_estadisticas import EstadisticasTab
 from utils import obtener_ruta_icono
+from utils.ui_zoom import (
+    PASO_ZOOM,
+    ZOOM_PREDETERMINADO,
+    cargar_zoom,
+    guardar_zoom,
+    normalizar_zoom,
+)
+from utils.ui_theme import (
+    PALETA,
+    aplicar_tema_base,
+    configurar_treeview_global,
+    estilos_barra,
+    estilos_boton,
+    estilos_panel,
+)
 
 
-ctk.set_appearance_mode("System")
-ctk.set_default_color_theme("blue")
+aplicar_tema_base()
 
 
 class AplicacionBodega(ctk.CTk):
@@ -32,10 +48,13 @@ class AplicacionBodega(ctk.CTk):
 
         self.usuario_actual = None
         self.rol_actual = None
+        self.zoom_porcentaje = cargar_zoom()
+        self.aplicar_zoom(self.zoom_porcentaje, guardar=False)
 
         self.title("Sistema de Gestión de Bodega")
         self.geometry("1200x800")
         self.minsize(1200, 800)
+        self.configure(fg_color=PALETA["fondo"])
 
         # Ocultar ventana principal hasta que todo esté listo
         self.withdraw()
@@ -70,12 +89,6 @@ class AplicacionBodega(ctk.CTk):
         # Datos de sesión
         self.rol_actual = self.usuario_actual.get("rol", "Consulta")
         self.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
-
-        # Cargar motores restantes
-        self.barcode = BarcodeGenerator()
-
-        # Revisar códigos de barras y QR faltantes en segundo plano
-        self.after(8000, self.iniciar_verificacion_codigos)
 
         # Cargar interfaz completa mientras la ventana sigue oculta
         self.inicializar_interfaz()
@@ -112,9 +125,10 @@ class AplicacionBodega(ctk.CTk):
                 state="disabled"
             )
             messagebox.showwarning(
-                "Migración de racks pendiente",
-                "Para crear y editar racks debe ejecutar "
-                "database/migrations/002_racks_configurables.sql en Supabase."
+                "Migración de sectores pendiente",
+                "Para usar sectores con numeración física de estantes debe "
+                "ejecutar las migraciones hasta "
+                "database/migrations/005_racks_solo_niveles.sql en Supabase."
             )
 
         # Maximizar luego de mostrarse
@@ -129,27 +143,10 @@ class AplicacionBodega(ctk.CTk):
     # ============================================================
     def configurar_estilo_tablas(self):
         estilo = ttk.Style()
-        estilo.theme_use("clam")
-
-        estilo.configure(
-            "Treeview",
-            background="#ffffff",
-            foreground="black",
-            rowheight=30,
-            fieldbackground="#ffffff",
-            bordercolor="#cccccc",
-            borderwidth=1
+        configurar_treeview_global(
+            estilo,
+            escala=self.zoom_porcentaje / 100
         )
-
-        estilo.configure(
-            "Treeview.Heading",
-            font=("Arial", 11, "bold"),
-            background="#e1e1e1",
-            foreground="black",
-            relief="solid"
-        )
-
-        estilo.map("Treeview", background=[("selected", "#1f538d")])
 
     # ============================================================
     # LOGIN
@@ -160,6 +157,7 @@ class AplicacionBodega(ctk.CTk):
         login.geometry("420x360")
         login.resizable(False, False)
         login.grab_set()
+        login.configure(fg_color=PALETA["fondo"])
 
         ruta_icono = obtener_ruta_icono("icono.ico")
         if os.path.exists(ruta_icono):
@@ -169,19 +167,20 @@ class AplicacionBodega(ctk.CTk):
 
         self.centrar_ventana(login, 420, 360)
 
-        frame = ctk.CTkFrame(login, corner_radius=15)
+        frame = ctk.CTkFrame(login, **estilos_panel())
         frame.pack(fill="both", expand=True, padx=25, pady=25)
 
         ctk.CTkLabel(
             frame,
             text="Sistema de Gestión de Bodega",
-            font=ctk.CTkFont(size=20, weight="bold")
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=PALETA["primario"]
         ).pack(pady=(25, 5))
 
         ctk.CTkLabel(
             frame,
             text="Ingrese sus credenciales para continuar",
-            text_color="gray"
+            text_color=PALETA["texto_suave"]
         ).pack(pady=(0, 20))
 
         entry_usuario = ctk.CTkEntry(
@@ -204,7 +203,7 @@ class AplicacionBodega(ctk.CTk):
         label_error = ctk.CTkLabel(
             frame,
             text="",
-            text_color="red",
+            text_color=PALETA["peligro"],
             font=ctk.CTkFont(size=12)
         )
         label_error.pack(pady=(5, 0))
@@ -217,7 +216,7 @@ class AplicacionBodega(ctk.CTk):
                 label_error.configure(text="Debe ingresar usuario y contraseña.")
                 return
 
-            datos_usuario = self.db.login_usuario_app(usuario, clave)
+            datos_usuario = self.db.login_usuario_app_con_logs(usuario, clave)
 
             if datos_usuario:
                 self.usuario_actual = datos_usuario
@@ -241,6 +240,7 @@ class AplicacionBodega(ctk.CTk):
             height=42,
             width=280,
             font=ctk.CTkFont(size=14, weight="bold"),
+            **estilos_boton("primario"),
             command=validar_login
         ).pack(pady=(20, 10))
 
@@ -249,8 +249,7 @@ class AplicacionBodega(ctk.CTk):
             text="Salir",
             height=34,
             width=280,
-            fg_color="#555555",
-            hover_color="#333333",
+            **estilos_boton("secundario"),
             command=self.cerrar_aplicacion_desde_login
         ).pack(pady=(0, 10))
 
@@ -289,52 +288,150 @@ class AplicacionBodega(ctk.CTk):
         nombre = self.usuario_actual.get("nombre", "Usuario")
         rol = self.usuario_actual.get("rol", "Consulta")
 
-        self.frame_superior = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_superior = ctk.CTkFrame(self, **estilos_barra())
         self.frame_superior.pack(fill="x", padx=20, pady=(12, 0))
 
         self.label_sesion = ctk.CTkLabel(
             self.frame_superior,
             text=f"Usuario: {nombre}  |  Rol: {rol}  |  Versión: {VERSION_APP}",
             font=ctk.CTkFont(size=13, weight="bold"),
-            text_color="gray"
+            text_color=PALETA["texto_suave"]
         )
-        self.label_sesion.pack(side="left")
+        self.label_sesion.pack(side="left", padx=14, pady=10)
 
-        self.tabview = ctk.CTkTabview(self)
+        self.boton_estadisticas = ctk.CTkButton(
+            self.frame_superior,
+            text="Ver estadísticas",
+            width=125,
+            **estilos_boton("fantasma"),
+            command=self.abrir_estadisticas,
+        )
+        self.boton_estadisticas.pack(side="right", padx=(4, 10), pady=6)
+
+        frame_zoom = ctk.CTkFrame(
+            self.frame_superior,
+            fg_color="transparent"
+        )
+        frame_zoom.pack(side="right", padx=10, pady=6)
+
+        ctk.CTkLabel(
+            frame_zoom,
+            text="Zoom:",
+            text_color=PALETA["texto_suave"]
+        ).pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(
+            frame_zoom,
+            text="−",
+            width=34,
+            height=30,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            **estilos_boton("fantasma"),
+            command=self.disminuir_zoom
+        ).pack(side="left", padx=2)
+
+        self.boton_zoom_actual = ctk.CTkButton(
+            frame_zoom,
+            text=f"{self.zoom_porcentaje}%",
+            width=62,
+            height=30,
+            **estilos_boton("fantasma"),
+            command=self.restablecer_zoom
+        )
+        self.boton_zoom_actual.pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            frame_zoom,
+            text="+",
+            width=34,
+            height=30,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            **estilos_boton("fantasma"),
+            command=self.aumentar_zoom
+        ).pack(side="left", padx=2)
+
+        self.configurar_atajos_zoom()
+
+        self.tabview = ctk.CTkTabview(
+            self,
+            fg_color=PALETA["panel"],
+            segmented_button_fg_color=PALETA["primario_suave"],
+            segmented_button_selected_color=PALETA["primario"],
+            segmented_button_selected_hover_color=PALETA["primario_hover"],
+            segmented_button_unselected_color=PALETA["primario_suave"],
+            segmented_button_unselected_hover_color=PALETA["borde"],
+            text_color=PALETA["texto"],
+        )
         self.tabview.pack(fill="both", expand=True, padx=20, pady=20)
 
         # Administrador y Bodeguero pueden usar todo
         if rol in ["Administrador", "Admin", "Bodeguero"]:
             self.vista_salidas = SalidasTab(
-                self.tabview.add("Registro de Salidas"),
-                self.db,
-                self.barcode
+                self.tabview.add("Salidas"),
+                self.db
             )
             self.vista_salidas.pack(fill="both", expand=True)
 
+            self.vista_registro_epp = RegistroEppTab(
+                self.tabview.add("EPP"),
+                self.db
+            )
+            self.vista_registro_epp.pack(fill="both", expand=True)
+            self.vista_salidas.on_epp_registrado = (
+                self.vista_registro_epp.iniciar_carga
+            )
+
+            self.vista_herramientas_personales = HerramientasPersonalesTab(
+                self.tabview.add("Herr. Personales"),
+                self.db
+            )
+            self.vista_herramientas_personales.pack(fill="both", expand=True)
+            self.vista_salidas.on_herramienta_personal_registrada = (
+                self.vista_herramientas_personales.iniciar_carga
+            )
+
             self.vista_inventario = InventarioTab(
-                self.tabview.add("Inventario General"),
-                self.db,
-                self.barcode
+                self.tabview.add("Inventario"),
+                self.db
             )
             self.vista_inventario.pack(fill="both", expand=True)
 
+            self.vista_cafeteria = InventarioTab(
+                self.tabview.add("Cafetería"),
+                self.db,
+                solo_cafeteria=True
+            )
+            self.vista_cafeteria.pack(fill="both", expand=True)
+
+            self.vista_aseo = InventarioTab(
+                self.tabview.add("Aseo"),
+                self.db,
+                solo_aseo=True
+            )
+            self.vista_aseo.pack(fill="both", expand=True)
+
+            self.vista_libreria = InventarioTab(
+                self.tabview.add("Librería"),
+                self.db,
+                solo_libreria=True
+            )
+            self.vista_libreria.pack(fill="both", expand=True)
+
             self.vista_mapa_bodega = MapaBodegaTab(
-                self.tabview.add("Mapa de Bodega"),
+                self.tabview.add("Sectores"),
                 self.db
             )
             self.vista_mapa_bodega.pack(fill="both", expand=True)
 
             self.vista_terreno = TerrenoTab(
-                self.tabview.add("Herramientas en Terreno"),
+                self.tabview.add("Terreno"),
                 self.db
             )
             self.vista_terreno.pack(fill="both", expand=True)
 
             self.vista_trabajadores = TrabajadoresTab(
                 self.tabview.add("Trabajadores"),
-                self.db,
-                self.barcode
+                self.db
             )
             self.vista_trabajadores.pack(fill="both", expand=True)
 
@@ -345,22 +442,48 @@ class AplicacionBodega(ctk.CTk):
             self.vista_proyectos.pack(fill="both", expand=True)
 
             self.vista_consumo_proyecto = ConsumoProyectoTab(
-                self.tabview.add("Consumo por Proyecto"),
+                self.tabview.add("Consumo Proyectos"),
                 self.db
             )
             self.vista_consumo_proyecto.pack(fill="both", expand=True)
 
+            self.vista_pgp = PgpTab(
+                self.tabview.add("PGP"),
+                self.db
+            )
+            self.vista_pgp.pack(fill="both", expand=True)
+
         # Consulta solo puede ver inventario y terreno
         elif rol == "Consulta":
             self.vista_inventario = InventarioTab(
-                self.tabview.add("Inventario General"),
-                self.db,
-                self.barcode
+                self.tabview.add("Inventario"),
+                self.db
             )
             self.vista_inventario.pack(fill="both", expand=True)
 
+            self.vista_cafeteria = InventarioTab(
+                self.tabview.add("Cafetería"),
+                self.db,
+                solo_cafeteria=True
+            )
+            self.vista_cafeteria.pack(fill="both", expand=True)
+
+            self.vista_aseo = InventarioTab(
+                self.tabview.add("Aseo"),
+                self.db,
+                solo_aseo=True
+            )
+            self.vista_aseo.pack(fill="both", expand=True)
+
+            self.vista_libreria = InventarioTab(
+                self.tabview.add("Librería"),
+                self.db,
+                solo_libreria=True
+            )
+            self.vista_libreria.pack(fill="both", expand=True)
+
             self.vista_terreno = TerrenoTab(
-                self.tabview.add("Herramientas en Terreno"),
+                self.tabview.add("Terreno"),
                 self.db
             )
             self.vista_terreno.pack(fill="both", expand=True)
@@ -368,14 +491,34 @@ class AplicacionBodega(ctk.CTk):
         # Si por error viene un rol no reconocido, se deja como consulta
         else:
             self.vista_inventario = InventarioTab(
-                self.tabview.add("Inventario General"),
-                self.db,
-                self.barcode
+                self.tabview.add("Inventario"),
+                self.db
             )
             self.vista_inventario.pack(fill="both", expand=True)
 
+            self.vista_cafeteria = InventarioTab(
+                self.tabview.add("Cafetería"),
+                self.db,
+                solo_cafeteria=True
+            )
+            self.vista_cafeteria.pack(fill="both", expand=True)
+
+            self.vista_aseo = InventarioTab(
+                self.tabview.add("Aseo"),
+                self.db,
+                solo_aseo=True
+            )
+            self.vista_aseo.pack(fill="both", expand=True)
+
+            self.vista_libreria = InventarioTab(
+                self.tabview.add("Librería"),
+                self.db,
+                solo_libreria=True
+            )
+            self.vista_libreria.pack(fill="both", expand=True)
+
             self.vista_terreno = TerrenoTab(
-                self.tabview.add("Herramientas en Terreno"),
+                self.tabview.add("Terreno"),
                 self.db
             )
             self.vista_terreno.pack(fill="both", expand=True)
@@ -398,22 +541,29 @@ class AplicacionBodega(ctk.CTk):
             "+ Nuevo Producto",
             "Dar de Baja",
             "Restaurar",
+            "Importar precios Excel",
             "Registrar Movimiento",
+            "Registrar y despachar PGP",
+            "Agregar artículos al PGP",
+            "Registrar devolución",
             "+ Nuevo Proyecto",
             "Inactivar",
             "Finalizar",
             "Reactivar",
             "+ Nuevo Trabajador",
-            "Crear 4 subdivisiones",
-            "Administrar racks"
+            "Administrar sectores"
         ]
 
         for nombre_vista in (
             "vista_inventario",
+            "vista_cafeteria",
+            "vista_aseo",
+            "vista_libreria",
             "vista_salidas",
             "vista_mapa_bodega",
             "vista_trabajadores",
-            "vista_proyectos"
+            "vista_proyectos",
+            "vista_pgp"
         ):
             vista = getattr(self, nombre_vista, None)
             if vista is not None:
@@ -422,11 +572,19 @@ class AplicacionBodega(ctk.CTk):
                     botones_bloqueados
                 )
 
-        if rol == "Consulta" and hasattr(self, "vista_inventario"):
-            self.deshabilitar_botones_por_texto(
-                self.vista_inventario,
-                ["Exportar a Excel"]
-            )
+        if rol == "Consulta":
+            for nombre_vista in (
+                "vista_inventario",
+                "vista_cafeteria",
+                "vista_aseo",
+                "vista_libreria"
+            ):
+                vista = getattr(self, nombre_vista, None)
+                if vista is not None:
+                    self.deshabilitar_botones_por_texto(
+                        vista,
+                        ["Exportar a Excel"]
+                    )
 
     def deshabilitar_botones_por_texto(self, widget_padre, textos_bloqueados):
         for widget in widget_padre.winfo_children():
@@ -437,9 +595,9 @@ class AplicacionBodega(ctk.CTk):
                     if texto in textos_bloqueados:
                         widget.configure(
                             state="disabled",
-                            fg_color="#777777",
-                            hover_color="#777777",
-                            text_color="#dddddd"
+                            fg_color=PALETA["borde"],
+                            hover_color=PALETA["borde"],
+                            text_color=PALETA["texto_suave"]
                         )
 
                 self.deshabilitar_botones_por_texto(widget, textos_bloqueados)
@@ -448,34 +606,106 @@ class AplicacionBodega(ctk.CTk):
                 pass
 
     # ============================================================
-    # VERIFICACIÓN DE CÓDIGOS LOCALES
-    # ============================================================
-    def iniciar_verificacion_codigos(self):
-        hilo = threading.Thread(
-            target=self.verificar_codigos_faltantes,
-            daemon=True
-        )
-        hilo.start()
-
-    def verificar_codigos_faltantes(self):
-        try:
-            productos = self.db.cargar_inventario_nube()
-            trabajadores = self.db.cargar_trabajadores_nube()
-
-            resumen = self.barcode.verificar_y_generar_faltantes(
-                productos,
-                trabajadores
-            )
-
-            print("Verificación de códigos locales completada:")
-            print(resumen)
-
-        except Exception as e:
-            print(f"Error verificando códigos faltantes: {e}")
-
-    # ============================================================
     # VENTANA / ACTUALIZACIÓN
     # ============================================================
+    def abrir_estadisticas(self):
+        ventana = getattr(self, "ventana_estadisticas", None)
+        try:
+            if ventana is not None and ventana.winfo_exists():
+                ventana.deiconify()
+                ventana.lift()
+                ventana.focus_force()
+                return
+        except TclError:
+            pass
+
+        ventana = ctk.CTkToplevel(self)
+        self.ventana_estadisticas = ventana
+        ventana.title("Estadísticas de artículos y proyectos")
+        ventana.geometry("1180x780")
+        ventana.minsize(920, 620)
+        ventana.configure(fg_color=PALETA["fondo"])
+        ventana.after(80, self.maximizar_ventana_estadisticas)
+        try:
+            ruta_icono = obtener_ruta_icono("icono.ico")
+            if os.path.exists(ruta_icono):
+                ventana.after(150, lambda: ventana.iconbitmap(ruta_icono))
+        except Exception:
+            pass
+
+        self.vista_estadisticas = EstadisticasTab(
+            ventana,
+            self.db,
+            escala_zoom=self.zoom_porcentaje / 100,
+        )
+        self.vista_estadisticas.pack(fill="both", expand=True)
+
+        def cerrar():
+            try:
+                ventana.destroy()
+            finally:
+                self.ventana_estadisticas = None
+                self.vista_estadisticas = None
+
+        ventana.protocol("WM_DELETE_WINDOW", cerrar)
+
+    def maximizar_ventana_estadisticas(self):
+        ventana = getattr(self, "ventana_estadisticas", None)
+        try:
+            if ventana is not None and ventana.winfo_exists():
+                ventana.state("zoomed")
+        except TclError:
+            pass
+
+    def configurar_atajos_zoom(self):
+        for secuencia in ("<Control-plus>", "<Control-equal>", "<Control-KP_Add>"):
+            self.bind_all(secuencia, self.aumentar_zoom, add="+")
+
+        for secuencia in ("<Control-minus>", "<Control-KP_Subtract>"):
+            self.bind_all(secuencia, self.disminuir_zoom, add="+")
+
+        for secuencia in ("<Control-0>", "<Control-KP_0>"):
+            self.bind_all(secuencia, self.restablecer_zoom, add="+")
+
+    def aplicar_zoom(self, porcentaje, guardar=True):
+        self.zoom_porcentaje = normalizar_zoom(porcentaje)
+        escala = self.zoom_porcentaje / 100
+
+        ctk.set_widget_scaling(escala)
+        ctk.set_window_scaling(escala)
+
+        try:
+            self.configurar_estilo_tablas()
+        except TclError:
+            pass
+
+        vista_estadisticas = getattr(self, "vista_estadisticas", None)
+        try:
+            if vista_estadisticas is not None and vista_estadisticas.winfo_exists():
+                vista_estadisticas.aplicar_zoom(escala)
+        except TclError:
+            pass
+
+        if hasattr(self, "boton_zoom_actual"):
+            self.boton_zoom_actual.configure(
+                text=f"{self.zoom_porcentaje}%"
+            )
+
+        if guardar:
+            guardar_zoom(self.zoom_porcentaje)
+
+    def aumentar_zoom(self, event=None):
+        self.aplicar_zoom(self.zoom_porcentaje + PASO_ZOOM)
+        return "break" if event is not None else None
+
+    def disminuir_zoom(self, event=None):
+        self.aplicar_zoom(self.zoom_porcentaje - PASO_ZOOM)
+        return "break" if event is not None else None
+
+    def restablecer_zoom(self, event=None):
+        self.aplicar_zoom(ZOOM_PREDETERMINADO)
+        return "break" if event is not None else None
+
     def preparar_ventana_principal(self):
         try:
             ancho = self.winfo_screenwidth()
@@ -523,6 +753,8 @@ if __name__ == "__main__":
     try:
         if app.winfo_exists():
             app.mainloop()
+    except TclError:
+        pass
     except Exception as e:
         traceback.print_exc()
         try:

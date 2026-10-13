@@ -1,7 +1,7 @@
 # Sistema de Gestion de Bodega
 
 Aplicacion de escritorio para gestionar inventario, salidas, proyectos,
-trabajadores, herramientas en terreno y mapa de bodega con racks configurables.
+trabajadores, herramientas en terreno y mapa de bodega por sectores y estantes.
 
 Version publica inicial: `v1.0.0`.
 
@@ -32,8 +32,18 @@ al EXE instalado. Ese archivo queda ignorado por Git.
 3. Ejecutar las migraciones en Supabase SQL Editor, en este orden:
 
 ```text
+database/migrations/000_esquema_base.sql
 database/migrations/001_integridad_seguridad.sql
 database/migrations/002_racks_configurables.sql
+database/migrations/003_politicas_lectura_app.sql
+database/migrations/004_corregir_ambiguedad_columna_racks.sql
+database/migrations/005_racks_solo_niveles.sql
+database/migrations/007_corregir_tipo_producto_origen.sql
+database/migrations/008_crear_productos_compatible.sql
+database/migrations/009_editar_cantidad_producto.sql
+database/migrations/010_bodega_exterior_sectores_especiales.sql
+database/migrations/011_separar_cafeteria_aseo.sql
+database/migrations/012_historial_cambios_precio.sql
 ```
 
 La llave `SUPABASE_SERVICE_ROLE_KEY` solo se usa para scripts administrativos
@@ -73,11 +83,9 @@ El repositorio debe incluir codigo fuente, migraciones y documentacion. No subir
 - `dist/`
 - `build/`
 - `installer_output/`
-- codigos QR o codigos de barra generados
 - llaves reales de Supabase
 
 Para publicar una version instalable, subir el instalador como asset de un
 GitHub Release, por ejemplo `v1.0.0`.
 
-El build solo empaqueta `assets/icono.ico`; los codigos generados por la app se
-guardan localmente en Documentos del usuario.
+El build empaqueta `assets/icono.ico` y las migraciones requeridas por la app.

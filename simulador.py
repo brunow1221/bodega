@@ -3,6 +3,8 @@ import os
 from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
+import config  # carga .env local antes de leer variables de entorno
+
 # ============================================================
 # CONEXION SUPABASE DESDE VARIABLES DE ENTORNO
 # ============================================================
@@ -94,6 +96,54 @@ def formatear_sku(numero):
     return f"SKU-SIM2025-{numero:04d}"
 
 
+def es_id_entero(valor):
+    if valor is None:
+        return False
+    if isinstance(valor, int):
+        return True
+    return str(valor).strip().isdigit()
+
+
+def id_entero_o_none(valor):
+    if es_id_entero(valor):
+        return int(valor)
+    return None
+
+
+def stock_desde_producto(producto):
+    stock = producto.get("stock")
+    if stock is None:
+        stock = producto.get("stock_actual")
+    return int(stock or 0)
+
+
+def codigo_producto_desde(producto):
+    return (
+        producto.get("codigo_barras")
+        or producto.get("sku")
+        or str(producto.get("id") or "")
+    )
+
+
+def actualizar_stock_producto(producto_id, stock):
+    stock = int(stock or 0)
+    intentos = [
+        {"stock": stock, "stock_actual": stock},
+        {"stock": stock},
+        {"stock_actual": stock},
+    ]
+    ultimo_error = None
+
+    for datos in intentos:
+        try:
+            supabase.table("productos").update(datos).eq("id", producto_id).execute()
+            return
+        except Exception as e:
+            ultimo_error = e
+
+    raise ultimo_error
+
+
 # ============================================================
 # LIMPIEZA OPCIONAL
 # ============================================================
@@ -103,11 +153,16 @@ def vaciar_base_de_datos():
 
     productos_sim = (
         supabase.table("productos")
-        .select("id")
+        .select("id,codigo_barras,sku")
         .like("codigo_barras", "SIM2025-PRD-%")
         .execute()
     ).data or []
     ids_productos = [p["id"] for p in productos_sim]
+    codigos_productos = [
+        codigo_producto_desde(p)
+        for p in productos_sim
+        if codigo_producto_desde(p)
+    ]
 
     try:
         eliminadas = 0
@@ -122,6 +177,21 @@ def vaciar_base_de_datos():
         print(f"  - Transacciones de {eliminadas} productos simulados eliminadas.")
     except Exception as e:
         print(f"  ⚠️ No se pudieron eliminar transacciones: {e}")
+
+    try:
+        eliminadas = 0
+        for i in range(0, len(codigos_productos), 100):
+            bloque = codigos_productos[i:i + 100]
+            if bloque:
+                supabase.table("transacciones").delete().in_(
+                    "codigo_producto",
+                    bloque
+                ).execute()
+                eliminadas += len(bloque)
+        if eliminadas:
+            print(f"  - Transacciones legacy de {eliminadas} productos simulados eliminadas.")
+    except Exception as e:
+        print(f"  - No se pudieron eliminar transacciones legacy: {e}")
 
     try:
         supabase.table("productos").delete().like("codigo_barras", "SIM2025-PRD-%").execute()
@@ -162,14 +232,14 @@ def obtener_bodega_principal():
 
 
 def asegurar_racks_y_ubicaciones():
-    print("📦 Verificando racks y ubicaciones 3x3...")
+    print("📦 Verificando sectores A/B y estantes numerados...")
 
     bodega = obtener_bodega_principal()
     bodega_id = bodega["id"]
 
-    # Crear R01 a R06 si no existen
-    for i in range(1, 7):
-        codigo_rack = f"R{i:02d}"
+    # Crear los dos sectores si no existen
+    for i in range(1, 3):
+        codigo_rack = chr(64 + i)
 
         existe = (
             supabase
@@ -184,10 +254,11 @@ def asegurar_racks_y_ubicaciones():
             supabase.table("racks").insert({
                 "bodega_id": bodega_id,
                 "codigo_rack": codigo_rack,
-                "nombre": f"Rack {i:02d}",
-                "descripcion": f"Rack de 200 cm - posición {i}",
-                "niveles": 3,
-                "columnas": 3,
+                "nombre": f"Sector {codigo_rack}",
+                "descripcion": "Numeración de derecha a izquierda",
+                "niveles": 5,
+                "columnas": 2,
+                "posicion_orden": i,
                 "estado": "Activo"
             }).execute()
 
@@ -201,72 +272,38 @@ def asegurar_racks_y_ubicaciones():
         .execute()
     ).data
 
-    niveles = ["N01", "N02", "N03"]
-    columnas = ["C01", "C02", "C03"]
-
     for rack in racks:
-        for nivel in niveles:
-            for columna in columnas:
-                codigo_ubicacion = f"B1-{rack['codigo_rack']}-{nivel}-{columna}"
-
-                existe = (
-                    supabase
-                    .table("ubicaciones")
-                    .select("id")
-                    .eq("codigo_ubicacion", codigo_ubicacion)
-                    .execute()
-                )
-
-                if not existe.data:
-                    supabase.table("ubicaciones").insert({
-                        "bodega_id": bodega_id,
-                        "rack_id": rack["id"],
-                        "codigo_ubicacion": codigo_ubicacion,
-                        "tipo": "Bloque",
-                        "nivel": nivel,
-                        "columna": columna,
-                        "subdivision": None,
-                        "ubicacion_padre_id": None,
-                        "descripcion": f"{rack['codigo_rack']} {nivel} {columna}",
-                        "estado": "Activo"
-                    }).execute()
-
-    # Crear algunas subdivisiones simuladas para probar el mapa
-    bloques = (
-        supabase
-        .table("ubicaciones")
-        .select("*")
-        .eq("tipo", "Bloque")
-        .eq("estado", "Activo")
-        .execute()
-    ).data
-
-    bloques_para_subdividir = random.sample(bloques, min(12, len(bloques)))
-
-    for bloque in bloques_para_subdividir:
-        for n in range(1, 5):
-            sub = f"S{n:02d}"
-            codigo_sub = f"{bloque['codigo_ubicacion']}-{sub}"
+        total_estantes = int(rack.get("niveles") or 5) * int(
+            rack.get("columnas") or 2
+        )
+        for numero in range(1, total_estantes + 1):
+            estante = f"E{numero:03d}"
+            modulo = ((numero - 1) // int(rack.get("niveles") or 5)) + 1
+            codigo_ubicacion = (
+                f"B{bodega_id}-{rack['codigo_rack']}-{estante}"
+            )
 
             existe = (
                 supabase
                 .table("ubicaciones")
                 .select("id")
-                .eq("codigo_ubicacion", codigo_sub)
+                .eq("codigo_ubicacion", codigo_ubicacion)
                 .execute()
             )
 
             if not existe.data:
                 supabase.table("ubicaciones").insert({
-                    "bodega_id": bloque["bodega_id"],
-                    "rack_id": bloque["rack_id"],
-                    "codigo_ubicacion": codigo_sub,
-                    "tipo": "Subdivision",
-                    "nivel": bloque["nivel"],
-                    "columna": bloque["columna"],
-                    "subdivision": sub,
-                    "ubicacion_padre_id": bloque["id"],
-                    "descripcion": f"{sub} de {bloque['codigo_ubicacion']}",
+                    "bodega_id": bodega_id,
+                    "rack_id": rack["id"],
+                    "codigo_ubicacion": codigo_ubicacion,
+                    "tipo": "Bloque",
+                    "nivel": estante,
+                    "columna": f"M{modulo:02d}",
+                    "subdivision": None,
+                    "ubicacion_padre_id": None,
+                    "descripcion": (
+                        f"Sector {rack['codigo_rack']} - Estante {numero}"
+                    ),
                     "estado": "Activo"
                 }).execute()
 
@@ -440,67 +477,47 @@ def generar_trabajadores():
 def generar_productos(ubicaciones):
     print(f"🧰 Generando {TOTAL_PRODUCTOS} artículos de inventario...")
 
-    marcas = [
-        "TecnoPro", "InduMax", "FerraChile", "SegurWork", "MetalPro",
-        "ElectroAndes", "BodegaPlus", "Herratek", "ProTools", "MaxSteel",
-        "AndesTools", "NorteFix", "SteelWork", "Maestranza Pro", "Bosch",
-        "Stanley", "Makita", "DeWalt", "3M", "Sika"
-    ]
-
     catalogo = {
         "Herramientas": {
-            "subcategorias": ["Manual", "Medición", "Ajuste", "Golpe"],
             "productos": [
                 "Llave inglesa", "Alicate universal", "Destornillador cruz",
                 "Destornillador paleta", "Martillo carpintero", "Huincha de medir",
                 "Nivel magnético", "Llave punta corona", "Prensa C", "Lima metálica"
             ],
-            "tallas": ["No aplica"],
             "dimensiones": ["8 pulgadas", "10 pulgadas", "12 pulgadas", "5 metros", "30 cm"]
         },
         "Insumos": {
-            "subcategorias": ["Consumibles", "Eléctricos", "Fijaciones", "Soldadura"],
             "productos": [
                 "Disco de corte", "Disco de desbaste", "Electrodo 6011", "Electrodo 7018",
                 "Cinta aislante", "Amarra plástica", "Broca acero rápido",
                 "Tornillo autoperforante", "Perno hexagonal", "Tuerca zincada",
                 "Golilla plana", "Silicona industrial", "Sellador poliuretano"
             ],
-            "tallas": ["No aplica"],
             "dimensiones": ["4.5 pulgadas", "1/8 pulgadas", "3/32 pulgadas", "10 metros", "100 unidades"]
         },
         "EPP": {
-            "subcategorias": [
-                "Protección manos", "Protección cabeza", "Protección visual",
-                "Protección respiratoria", "Protección pies", "Alta visibilidad"
-            ],
             "productos": [
                 "Guantes cabritilla", "Guantes nitrilo", "Casco de seguridad",
                 "Lentes claros", "Lentes oscuros", "Mascarilla medio rostro",
                 "Chaleco reflectante", "Zapatos de seguridad", "Protector auditivo",
                 "Arnés de seguridad"
             ],
-            "tallas": ["S", "M", "L", "XL", "42", "43", "44"],
             "dimensiones": ["Estándar", "Ajustable", "Reforzado", "Certificado"]
         },
         "Equipos": {
-            "subcategorias": ["Soldadura", "Corte", "Perforación", "Pulido", "Izaje"],
             "productos": [
                 "Máquina de soldar inverter", "Esmeril angular", "Taladro percutor",
                 "Sierra circular", "Cortadora sensitiva", "Rotomartillo",
                 "Tecle manual", "Eslinga poliéster", "Grillete lira", "Tirfor manual"
             ],
-            "tallas": ["No aplica"],
             "dimensiones": ["220V", "110V", "7 pulgadas", "4.5 pulgadas", "1 tonelada", "2 toneladas"]
         },
         "Materiales": {
-            "subcategorias": ["Acero", "Perfiles", "Planchas", "Tuberías", "Eléctricos"],
             "productos": [
                 "Perfil ángulo", "Perfil canal", "Tubo cuadrado", "Plancha acero",
                 "Cable eléctrico", "Canaleta PVC", "Conduit galvanizado",
                 "Barra roscada", "Malla metálica", "Pletina acero"
             ],
-            "tallas": ["No aplica"],
             "dimensiones": ["20x20x3 mm", "40x40x3 mm", "1.5 mm", "3 mm", "6 metros", "100 metros"]
         }
     }
@@ -514,9 +531,6 @@ def generar_productos(ubicaciones):
         data_cat = catalogo[categoria]
 
         nombre_base = random.choice(data_cat["productos"])
-        marca = random.choice(marcas)
-        subcategoria = random.choice(data_cat["subcategorias"])
-        talla = random.choice(data_cat["tallas"])
         dimensiones = random.choice(data_cat["dimensiones"])
 
         codigo = formatear_codigo_producto(i)
@@ -550,12 +564,9 @@ def generar_productos(ubicaciones):
         productos.append({
             "codigo_barras": codigo,
             "sku": sku,
-            "nombre": f"{nombre_base} {marca} {dimensiones}",
+            "nombre": f"{nombre_base} {dimensiones}",
             "categoria": categoria,
-            "subcategoria": subcategoria,
-            "marca": marca,
             "tamaño_dimensiones": dimensiones,
-            "talla": talla,
             "stock": stock,
             "stock_minimo": stock_minimo,
             "precio_unitario": precio,
@@ -604,6 +615,18 @@ def generar_transacciones(productos, proyectos, trabajadores):
 
     trabajadores_ids = [t["id"] for t in trabajadores]
     proyectos_ids = [p["id"] for p in proyectos]
+    trabajadores_por_id = {t["id"]: t for t in trabajadores}
+    proyectos_por_id = {p["id"]: p for p in proyectos}
+    usar_esquema_legacy = any(
+        not es_id_entero(p.get("id"))
+        for p in productos
+    )
+
+    if usar_esquema_legacy:
+        print(
+            "  - Esquema mixto detectado: productos.id es UUID; "
+            "las transacciones usaran codigo_producto."
+        )
 
     movimientos_resta = [
         "Entrega / Consumo",
@@ -644,7 +667,7 @@ def generar_transacciones(productos, proyectos, trabajadores):
         producto_id = producto["id"]
 
         categoria = producto.get("categoria", "")
-        stock_actual = int(producto.get("stock") or 0)
+        stock_actual = stock_desde_producto(producto)
 
         proyecto_id = random.choice(proyectos_ids)
 
@@ -695,7 +718,7 @@ def generar_transacciones(productos, proyectos, trabajadores):
                 llave = random.choice(list(prestamos_activos.keys()))
                 producto_id, trabajador_id = llave
                 producto = productos_estado[producto_id]
-                stock_actual = int(producto.get("stock") or 0)
+                stock_actual = stock_desde_producto(producto)
                 del prestamos_activos[llave]
             else:
                 tipo = "Entrada / Reposición"
@@ -715,7 +738,7 @@ def generar_transacciones(productos, proyectos, trabajadores):
                 llave_rep = random.choice(list(reparaciones_activas.keys()))
                 producto_id = llave_rep
                 producto = productos_estado[producto_id]
-                stock_actual = int(producto.get("stock") or 0)
+                stock_actual = stock_desde_producto(producto)
                 del reparaciones_activas[llave_rep]
             else:
                 tipo = "Entrada / Reposición"
@@ -747,20 +770,34 @@ def generar_transacciones(productos, proyectos, trabajadores):
 
         comentario = generar_comentario(tipo)
 
-        transacciones.append({
+        producto_id_db = id_entero_o_none(producto_id)
+        proyecto_id_db = id_entero_o_none(proyecto_id)
+        trabajador_id_db = id_entero_o_none(trabajador_id)
+        proyecto = proyectos_por_id.get(proyecto_id, {})
+        trabajador = trabajadores_por_id.get(trabajador_id, {})
+
+        transaccion = {
             "fecha_hora": fecha.isoformat(),
-            "producto_id": producto_id,
-            "proyecto_id": proyecto_id,
-            "trabajador_id": trabajador_id,
+            "producto_id": producto_id_db,
+            "proyecto_id": proyecto_id_db,
+            "trabajador_id": trabajador_id_db,
             "tipo_movimiento": tipo,
             "cantidad_movida": cantidad,
             "stock_anterior": stock_actual,
             "stock_nuevo": stock_nuevo,
             "comentario": comentario,
             "creado_por_usuario": "Simulador 2025"
-        })
+        }
+
+        if usar_esquema_legacy:
+            transaccion["codigo_producto"] = codigo_producto_desde(producto)
+            transaccion["codigo_trabajador"] = trabajador.get("rut")
+            transaccion["proyecto"] = proyecto.get("nombre")
+
+        transacciones.append(transaccion)
 
         producto["stock"] = stock_nuevo
+        producto["stock_actual"] = stock_nuevo
         productos_estado[producto_id] = producto
 
     insertar_en_bloques("transacciones", transacciones, 100)
@@ -771,9 +808,7 @@ def generar_transacciones(productos, proyectos, trabajadores):
     print("📌 Actualizando stock final en productos...")
 
     for producto_id, producto in productos_estado.items():
-        supabase.table("productos").update({
-            "stock": int(producto.get("stock") or 0)
-        }).eq("id", producto_id).execute()
+        actualizar_stock_producto(producto_id, stock_desde_producto(producto))
 
     print("  - Stock final actualizado.")
 
@@ -838,6 +873,8 @@ def generar_datos():
     print("==============================================")
     print(" SIMULADOR BODEGA V2 - DATOS AÑO 2025")
     print("==============================================")
+    print(f"Proyecto Supabase: {URL_SUPABASE}")
+    print(f"Limpieza previa: {'SI' if LIMPIAR_ANTES else 'NO'}")
 
     if LIMPIAR_ANTES:
         vaciar_base_de_datos()

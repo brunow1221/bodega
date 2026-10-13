@@ -1,11 +1,14 @@
 import customtkinter as ctk
 from tkinter import ttk
 import threading
+from utils.ui_dispatcher import ejecutar_en_ui, iniciar_despachador_ui
+from utils.ui_theme import estilos_barra, estilos_boton, estilos_panel, estilizar_treeview
 
 class HistorialTab(ctk.CTkFrame):
     def __init__(self, master, db_manager):
         super().__init__(master, fg_color="transparent")
         self.db = db_manager
+        iniciar_despachador_ui(self)
         self.crear_interfaz()
         self.iniciar_carga_hilo()
 
@@ -14,16 +17,21 @@ class HistorialTab(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         # --- Encabezado ---
-        frame_top = ctk.CTkFrame(self, fg_color="transparent")
+        frame_top = ctk.CTkFrame(self, **estilos_barra())
         frame_top.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         
         ctk.CTkLabel(frame_top, text="Últimos 100 Movimientos (Solo Lectura)", font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
         
-        self.btn_refrescar = ctk.CTkButton(frame_top, text="Refrescar Historial", command=self.iniciar_carga_hilo)
+        self.btn_refrescar = ctk.CTkButton(
+            frame_top,
+            text="Refrescar Historial",
+            **estilos_boton("primario"),
+            command=self.iniciar_carga_hilo
+        )
         self.btn_refrescar.pack(side="right")
 
         # --- Tabla ---
-        frame_tabla = ctk.CTkFrame(self)
+        frame_tabla = ctk.CTkFrame(self, **estilos_panel())
         frame_tabla.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         frame_tabla.pack_propagate(False)
 
@@ -45,8 +53,7 @@ class HistorialTab(ctk.CTkFrame):
         scroll_x.config(command=self.tabla.xview)
         
         # Colores cebra
-        self.tabla.tag_configure("par", background="#F5F5F5")
-        self.tabla.tag_configure("impar", background="#FFFFFF")
+        estilizar_treeview(self.tabla)
 
     def iniciar_carga_hilo(self):
         self.btn_refrescar.configure(state="disabled", text="Cargando...")
@@ -55,7 +62,7 @@ class HistorialTab(ctk.CTkFrame):
 
     def tarea_carga(self):
         filas = self.db.obtener_historial_reciente()
-        self.after(0, self.actualizar_tabla, filas)
+        ejecutar_en_ui(self, self.actualizar_tabla, filas)
 
     def actualizar_tabla(self, filas):
         for i, f in enumerate(filas):

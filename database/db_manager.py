@@ -1,43 +1,151 @@
+import ast
+import os
+import threading
 import time
+from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from supabase import create_client, Client
+from utils.fechas import formatear_fecha_hora, fecha_actual_bodega
+from utils.pgp import (
+    TIPO_DEVOLUCION_PGP,
+    TIPO_PRESTAMO_PGP,
+    cantidad_pendiente_item_pgp,
+    preparar_items_pgp,
+)
+from utils.movimientos import TIPO_ENTREGA_HERRAMIENTA_PERSONAL
 
 
 class DatabaseManager:
     def __init__(self, url, key):
-        self.supabase: Client = create_client(url, key)
+        self.url = url
+        self.key = key
+        self.supabase: Client = create_client(self.url, self.key)
+        self._lock_supabase = threading.RLock()
         self.session_token = None
         self.usuario_actual = None
         self.migracion_seguridad_disponible = False
         self.migracion_racks_disponible = False
+        self.debug_login = (
+            os.environ.get("DEBUG_LOGIN", "0").strip().lower()
+            in {"1", "true", "yes", "si"}
+        )
+        self._log_db(f"DatabaseManager cargado desde {__file__}")
 
-    def verificar_migracion_racks(self):
+    def _log_login(self, mensaje):
+        if self.debug_login:
+            print(f"[LOGIN DEBUG] {mensaje}")
+
+    def _log_db(self, mensaje):
+        if os.environ.get("DEBUG_DB", "0").strip().lower() in {"1", "true", "yes", "si"}:
+            print(f"[DB DEBUG] {mensaje}")
+
+    def _reiniciar_cliente_supabase(self):
+        self.supabase = create_client(self.url, self.key)
+
+    def _mensaje_error(self, error):
+        datos = None
+        if getattr(error, "args", None):
+            datos = error.args[0]
+        if isinstance(datos, dict):
+            return datos.get("message") or datos.get("details") or str(error)
+
+        texto = str(error)
         try:
-            (
+            datos = ast.literal_eval(texto)
+            if isinstance(datos, dict):
+                return datos.get("message") or datos.get("details") or texto
+        except Exception:
+            pass
+
+        return texto
+
+    def _log_estado_usuario_login(self, usuario):
+        if not self.debug_login:
+            return
+
+        try:
+            res = (
                 self.supabase
-                .table("racks")
-                .select(
-                    "id,ancho_cm,alto_cm,profundidad_cm,"
-                    "capacidad_kg,posicion_orden"
-                )
+                .table("usuarios_app")
+                .select("id,usuario,nombre,rol,estado,password_hash")
+                .eq("usuario", usuario)
                 .limit(1)
                 .execute()
             )
-            self.migracion_racks_disponible = True
+            filas = res.data or []
+            self._log_login(f"usuarios_app filas encontradas: {len(filas)}")
+
+            if not filas:
+                return
+
+            fila = filas[0]
+            password_hash = fila.get("password_hash") or ""
+            self._log_login(
+                "usuario encontrado: "
+                f"id={fila.get('id')} "
+                f"usuario={fila.get('usuario')} "
+                f"rol={fila.get('rol')} "
+                f"estado={fila.get('estado')} "
+                f"hash_presente={bool(password_hash)} "
+                f"hash_prefijo={password_hash[:7] if password_hash else '-'} "
+                f"hash_largo={len(password_hash)}"
+            )
+        except Exception as e:
+            self._log_login(f"no se pudo leer usuarios_app: {e}")
+
+    def verificar_migracion_racks(self):
+        try:
+            self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("racks")
+                    .select(
+                        "id,ancho_cm,alto_cm,profundidad_cm,"
+                        "capacidad_kg,posicion_orden"
+                    )
+                    .limit(1)
+                    .execute()
+                )
+            )
+            modo = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("config_app")
+                    .select("valor")
+                    .eq("clave", "modo_racks")
+                    .limit(1)
+                    .execute()
+                )
+            )
+            self.migracion_racks_disponible = bool(
+                modo.data
+                and modo.data[0].get("valor") == "sectores_estantes_v1"
+            )
         except Exception:
             self.migracion_racks_disponible = False
         return self.migracion_racks_disponible
 
-    def _ejecutar_con_reintentos(self, operacion, intentos=3):
+    def _ejecutar_con_reintentos(self, operacion, intentos=6):
         ultimo_error = None
         marcadores_transitorios = (
             "timeout",
             "timed out",
             "server disconnected",
+            "server disconnect",
             "connection",
+            "connection reset",
+            "connection aborted",
+            "network",
             "temporarily unavailable",
             "remote protocol error",
+            "remoteprotocolerror",
+            "httpcore",
+            "httpx",
+            "deadlock detected",
+            "40p01",
+            "serialization failure",
+            "40001",
             "502",
             "503",
             "504"
@@ -45,7 +153,8 @@ class DatabaseManager:
 
         for intento in range(intentos):
             try:
-                return operacion()
+                with self._lock_supabase:
+                    return operacion()
             except Exception as e:
                 ultimo_error = e
                 texto = str(e).lower()
@@ -55,9 +164,45 @@ class DatabaseManager:
                 )
                 if not es_transitorio or intento == intentos - 1:
                     raise
-                time.sleep(0.4 * (2 ** intento))
+                self._log_db(
+                    f"error transitorio, reintento {intento + 2}/{intentos}: {e}"
+                )
+                with self._lock_supabase:
+                    self._reiniciar_cliente_supabase()
+                time.sleep(min(0.75 * (2 ** intento), 6))
 
         raise ultimo_error
+
+    def _cargar_tabla_paginada(
+        self,
+        tabla,
+        columnas="*",
+        ordenar_por=None,
+        desc=False,
+        tamano_pagina=1000,
+    ):
+        """Carga una tabla completa sin depender del límite de PostgREST."""
+        filas = []
+        inicio = 0
+
+        while True:
+            def consultar(inicio_pagina=inicio):
+                consulta = self.supabase.table(tabla).select(columnas)
+                if ordenar_por:
+                    consulta = consulta.order(ordenar_por, desc=desc)
+                return consulta.range(
+                    inicio_pagina,
+                    inicio_pagina + tamano_pagina - 1,
+                ).execute()
+
+            respuesta = self._ejecutar_con_reintentos(consultar)
+            pagina = list(respuesta.data or [])
+            filas.extend(pagina)
+            if len(pagina) < tamano_pagina:
+                break
+            inicio += tamano_pagina
+
+        return filas
 
     def _requiere_sesion(self):
         if not self.session_token:
@@ -144,6 +289,82 @@ class DatabaseManager:
 
         return None
 
+    def login_usuario_app_con_logs(self, usuario, password):
+        if not self.debug_login:
+            return self.login_usuario_app(usuario, password)
+
+        self._log_login(
+            f"intentando login usuario='{usuario}' password_largo={len(password)}"
+        )
+        self._log_estado_usuario_login(usuario)
+
+        try:
+            self._log_login("llamando RPC iniciar_sesion_app")
+            res = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "iniciar_sesion_app",
+                    {
+                        "p_usuario": usuario,
+                        "p_password": password
+                    }
+                ).execute()
+            )
+            datos = res.data
+            self._log_login(f"respuesta iniciar_sesion_app: {datos}")
+
+            if isinstance(datos, list):
+                datos = datos[0] if datos else None
+
+            if datos:
+                self.session_token = datos.get("session_token")
+                self.usuario_actual = datos
+                self.migracion_seguridad_disponible = bool(self.session_token)
+                self.verificar_migracion_racks()
+                self._log_login(
+                    "login seguro OK: "
+                    f"usuario={datos.get('usuario')} "
+                    f"rol={datos.get('rol')} "
+                    f"session_token={bool(self.session_token)}"
+                )
+                return datos
+
+            self._log_login("iniciar_sesion_app no devolvio usuario")
+        except Exception as e:
+            print(f"Inicio de sesiÃ³n segura no disponible: {e}")
+            self._log_login(f"iniciar_sesion_app fallo: {e}")
+
+        try:
+            self._log_login("llamando RPC login_usuario_app")
+            res = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "login_usuario_app",
+                    {
+                        "p_usuario": usuario,
+                        "p_password": password
+                    }
+                ).execute()
+            )
+            self._log_login(f"respuesta login_usuario_app: {res.data}")
+
+            if res.data and len(res.data) > 0:
+                self.usuario_actual = res.data[0]
+                self.session_token = None
+                self.migracion_seguridad_disponible = False
+                self.verificar_migracion_racks()
+                self._log_login(
+                    "login legacy OK: "
+                    f"usuario={res.data[0].get('usuario')} "
+                    f"rol={res.data[0].get('rol')}"
+                )
+                return res.data[0]
+
+            self._log_login("login_usuario_app no devolvio filas")
+        except Exception as e:
+            print(f"Error en login: {e}")
+            self._log_login(f"login_usuario_app fallo: {e}")
+
+        return None
+
     def cerrar_sesion(self):
         token = self.session_token
         self.session_token = None
@@ -187,7 +408,9 @@ class DatabaseManager:
 
     def obtener_config_app(self):
         try:
-            res = self.supabase.table("config_app").select("*").execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: self.supabase.table("config_app").select("*").execute()
+            )
 
             return {
                 item["clave"]: item["valor"]
@@ -203,13 +426,15 @@ class DatabaseManager:
     # ============================================================
     def cargar_bodegas(self):
         try:
-            res = (
-                self.supabase
-                .table("bodegas")
-                .select("*")
-                .eq("estado", "Activo")
-                .order("nombre")
-                .execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("bodegas")
+                    .select("*")
+                    .eq("estado", "Activo")
+                    .order("nombre")
+                    .execute()
+                )
             )
 
             return res.data
@@ -231,11 +456,15 @@ class DatabaseManager:
                 return query.order("codigo_rack")
 
             try:
-                res = construir_query(con_posicion=True).execute()
+                res = self._ejecutar_con_reintentos(
+                    lambda: construir_query(con_posicion=True).execute()
+                )
             except Exception as e:
                 if "posicion_orden" not in str(e):
                     raise
-                res = construir_query(con_posicion=False).execute()
+                res = self._ejecutar_con_reintentos(
+                    lambda: construir_query(con_posicion=False).execute()
+                )
             return res.data
 
         except Exception as e:
@@ -244,20 +473,25 @@ class DatabaseManager:
 
     def cargar_ubicaciones(self, rack_id=None, solo_activas=True):
         try:
-            query = (
-                self.supabase
-                .table("ubicaciones")
-                .select("*")
-                .order("codigo_ubicacion")
+            def construir_query():
+                query = (
+                    self.supabase
+                    .table("ubicaciones")
+                    .select("*")
+                    .order("codigo_ubicacion")
+                )
+
+                if rack_id:
+                    query = query.eq("rack_id", rack_id)
+
+                if solo_activas:
+                    query = query.eq("estado", "Activo")
+
+                return query
+
+            res = self._ejecutar_con_reintentos(
+                lambda: construir_query().execute()
             )
-
-            if rack_id:
-                query = query.eq("rack_id", rack_id)
-
-            if solo_activas:
-                query = query.eq("estado", "Activo")
-
-            res = query.execute()
             return res.data
 
         except Exception as e:
@@ -269,13 +503,15 @@ class DatabaseManager:
         Devuelve lista simple para combos.
         """
         try:
-            res = (
-                self.supabase
-                .table("ubicaciones")
-                .select("id, codigo_ubicacion, tipo, estado")
-                .eq("estado", "Activo")
-                .order("codigo_ubicacion")
-                .execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("ubicaciones")
+                    .select("id, codigo_ubicacion, tipo, estado")
+                    .eq("estado", "Activo")
+                    .order("codigo_ubicacion")
+                    .execute()
+                )
             )
 
             return res.data
@@ -306,6 +542,12 @@ class DatabaseManager:
             return False, mensaje
 
         try:
+            payload = dict(datos)
+            if accion in {"crear", "actualizar"}:
+                payload["columnas"] = max(
+                    1,
+                    int(payload.get("columnas") or 2)
+                )
             request_id = str(uuid4())
             self._ejecutar_con_reintentos(
                 lambda: self.supabase.rpc(
@@ -314,13 +556,19 @@ class DatabaseManager:
                         "p_token": self.session_token,
                         "p_request_id": request_id,
                         "p_accion": accion,
-                        "p_datos": datos
+                        "p_datos": payload
                     }
                 ).execute()
             )
-            return True, "Rack actualizado correctamente."
+            return True, "Sector actualizado correctamente."
         except Exception as e:
-            return False, str(e)
+            mensaje_error = self._mensaje_error(e)
+            if "debe ser a o b" in mensaje_error.lower():
+                mensaje_error = (
+                    "Falta ejecutar la migración 010 de bodegas y sectores "
+                    "múltiples en Supabase."
+                )
+            return False, mensaje_error
 
     def crear_rack(
         self,
@@ -328,8 +576,8 @@ class DatabaseManager:
         codigo_rack,
         nombre="",
         descripcion="",
-        niveles=3,
-        columnas=3,
+        niveles=5,
+        columnas=2,
         ancho_cm=None,
         alto_cm=None,
         profundidad_cm=None,
@@ -342,6 +590,8 @@ class DatabaseManager:
             "nombre": nombre or codigo_rack,
             "descripcion": descripcion,
             "niveles": niveles,
+            # Compatibilidad interna: niveles = estantes por módulo y
+            # columnas = módulos físicos del sector.
             "columnas": columnas,
             "ancho_cm": ancho_cm,
             "alto_cm": alto_cm,
@@ -351,7 +601,7 @@ class DatabaseManager:
         }
         exito, mensaje = self.gestionar_rack("crear", data)
         if exito:
-            return True, "Rack creado correctamente."
+            return True, "Sector creado correctamente."
         return False, mensaje
 
     def actualizar_rack(self, rack_id, datos):
@@ -405,13 +655,15 @@ class DatabaseManager:
         devuelve una lista de nombres para el ComboBox.
         """
         try:
-            res = (
-                self.supabase
-                .table("proyectos")
-                .select("nombre")
-                .eq("estado", "Activo")
-                .order("nombre")
-                .execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("proyectos")
+                    .select("nombre")
+                    .eq("estado", "Activo")
+                    .order("nombre")
+                    .execute()
+                )
             )
 
             if res.data:
@@ -425,12 +677,14 @@ class DatabaseManager:
 
     def cargar_proyectos_completo(self):
         try:
-            res = (
-                self.supabase
-                .table("proyectos")
-                .select("*")
-                .order("nombre")
-                .execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("proyectos")
+                    .select("*")
+                    .order("nombre")
+                    .execute()
+                )
             )
 
             return res.data
@@ -441,12 +695,14 @@ class DatabaseManager:
 
     def obtener_proyecto_por_nombre(self, nombre):
         try:
-            res = (
-                self.supabase
-                .table("proyectos")
-                .select("*")
-                .eq("nombre", nombre)
-                .execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("proyectos")
+                    .select("*")
+                    .eq("nombre", nombre)
+                    .execute()
+                )
             )
 
             return res.data[0] if res.data else None
@@ -462,7 +718,7 @@ class DatabaseManager:
             "cliente": cliente,
             "descripcion": descripcion,
             "fecha_inicio": fecha_inicio,
-            "fecha_fin": fecha_fin,
+            "fecha_fin": None,
             "_modulo": "Proyectos",
             "_accion": "Crear proyecto",
             "_detalle": f"Se creó el proyecto {nombre}"
@@ -474,6 +730,29 @@ class DatabaseManager:
 
     def actualizar_proyecto(self, id_proyecto, datos):
         payload = dict(datos)
+        payload.pop("fecha_fin", None)
+        if "estado" in payload:
+            try:
+                respuesta = self._ejecutar_con_reintentos(
+                    lambda: self.supabase.table("proyectos")
+                    .select("estado,fecha_fin,fecha_inicio")
+                    .eq("id", id_proyecto).execute()
+                )
+                if not respuesta.data:
+                    return False, "Proyecto no encontrado."
+                anterior = respuesta.data[0]
+                if payload["estado"] == "Finalizado":
+                    fin = anterior.get("fecha_fin")
+                    if anterior.get("estado") != "Finalizado":
+                        fin = fecha_actual_bodega()
+                        payload["fecha_fin"] = fin
+                    inicio = payload.get("fecha_inicio", anterior.get("fecha_inicio"))
+                    if inicio and fin and str(inicio) > str(fin):
+                        return False, "La fecha de inicio es posterior a la fecha de término."
+                else:
+                    payload["fecha_fin"] = None
+            except Exception as error:
+                return False, self._mensaje_error(error)
         payload.update({
             "id": id_proyecto,
             "_modulo": "Proyectos",
@@ -488,14 +767,16 @@ class DatabaseManager:
     # ============================================================
     # TRABAJADORES
     # ============================================================
-    def obtener_nombre_trabajador(self, codigo_qr):
+    def obtener_nombre_trabajador(self, rut):
         try:
-            respuesta = (
-                self.supabase
-                .table("trabajadores")
-                .select("nombre")
-                .eq("rut", codigo_qr)
-                .execute()
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("trabajadores")
+                    .select("nombre")
+                    .eq("rut", rut)
+                    .execute()
+                )
             )
 
             return respuesta.data[0]["nombre"] if respuesta.data else None
@@ -506,15 +787,20 @@ class DatabaseManager:
 
     def cargar_trabajadores_nube(self, solo_activos=True):
         try:
-            query = (
-                self.supabase
-                .table("trabajadores")
-                .select("*")
-                .order("nombre")
+            def construir_query():
+                query = (
+                    self.supabase
+                    .table("trabajadores")
+                    .select("*")
+                    .order("nombre")
+                )
+                if solo_activos:
+                    query = query.eq("estado", "Activo")
+                return query
+
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: construir_query().execute()
             )
-            if solo_activos:
-                query = query.eq("estado", "Activo")
-            respuesta = query.execute()
 
             return respuesta.data
 
@@ -540,13 +826,15 @@ class DatabaseManager:
 
     def buscar_trabajador_por_rut(self, rut):
         try:
-            res = (
-                self.supabase
-                .table("trabajadores")
-                .select("*")
-                .eq("rut", rut)
-                .eq("estado", "Activo")
-                .execute()
+            res = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("trabajadores")
+                    .select("*")
+                    .eq("rut", rut)
+                    .eq("estado", "Activo")
+                    .execute()
+                )
             )
 
             return res.data[0] if res.data else None
@@ -558,9 +846,29 @@ class DatabaseManager:
     # ============================================================
     # PRODUCTOS / INVENTARIO
     # ============================================================
-    def cargar_inventario_nube(self):
+    def cargar_productos_activos_selector(self):
+        """Carga productos activos para selección manual en movimientos."""
         try:
-            respuesta = self.supabase.table("productos").select("*").execute()
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("productos")
+                    .select("*")
+                    .eq("estado", "Activo")
+                    .order("nombre")
+                    .execute()
+                )
+            )
+            return respuesta.data or []
+        except Exception as e:
+            print(f"Error cargando productos para selector: {e}")
+            return []
+
+    def cargar_inventario_nube(self, propagar_error=False):
+        try:
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.table("productos").select("*").execute()
+            )
 
             productos = respuesta.data or []
 
@@ -606,17 +914,21 @@ class DatabaseManager:
 
         except Exception as e:
             print(f"Error al cargar inventario: {e}")
+            if propagar_error:
+                raise
             return []
 
     def cargar_inactivos_nube(self):
         try:
-            respuesta = (
-                self.supabase
-                .table("productos")
-                .select("*")
-                .eq("estado", "Inactivo")
-                .order("id")
-                .execute()
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("productos")
+                    .select("*")
+                    .eq("estado", "Inactivo")
+                    .order("id")
+                    .execute()
+                )
             )
 
             return respuesta.data
@@ -631,14 +943,11 @@ class DatabaseManager:
         ot,
         nombre,
         categoria,
-        subcategoria,
         tamano,
-        talla,
         stock,
         precio_unitario=0,
         ubicacion_id=None,
         stock_minimo=0,
-        marca="",
         tipo_medicion="No aplica",
         medida_largo=None,
         medida_ancho=None,
@@ -652,10 +961,7 @@ class DatabaseManager:
             "codigo_barras": codigo,
             "nombre": nombre,
             "categoria": categoria,
-            "subcategoria": subcategoria,
-            "marca": marca,
             "tamaño_dimensiones": tamano,
-            "talla": talla,
             "stock": stock,
             "stock_minimo": stock_minimo,
             "precio_unitario": precio_unitario,
@@ -672,10 +978,43 @@ class DatabaseManager:
             "_accion": "Crear producto",
             "_detalle": f"Se creó el producto {nombre} con código {codigo}"
         }
-        exito, mensaje, _ = self._mutar("crear_producto", data)
+        exito, mensaje, _ = self._crear_producto_compatible(data)
         if exito:
             return True, "Producto guardado correctamente."
         return False, mensaje
+
+    def _crear_producto_compatible(self, datos):
+        """Crea productos sin asumir si los identificadores son UUID o bigint."""
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje, None
+
+        request_id = str(uuid4())
+        try:
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "crear_producto_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": request_id,
+                        "p_datos": datos
+                    }
+                ).execute()
+            )
+            return True, "Operación realizada correctamente.", respuesta.data
+        except Exception as e:
+            mensaje_error = self._mensaje_error(e)
+            if "crear_producto_app" in mensaje_error and (
+                "does not exist" in mensaje_error.lower()
+                or "not found" in mensaje_error.lower()
+                or "could not find" in mensaje_error.lower()
+                or "pgrst202" in mensaje_error.lower()
+            ):
+                mensaje_error = (
+                    "Falta ejecutar la migración "
+                    "008_crear_productos_compatible.sql en Supabase."
+                )
+            return False, mensaje_error, None
 
     def crear_retazo_con_entrada(self, datos_retazo, proyecto, rut_trabajador=""):
         payload = dict(datos_retazo)
@@ -690,7 +1029,7 @@ class DatabaseManager:
                 f"para el proyecto {proyecto}"
             )
         })
-        exito, mensaje, respuesta = self._mutar("crear_retazo", payload)
+        exito, mensaje, respuesta = self._crear_producto_compatible(payload)
         if not exito:
             return False, mensaje, None
 
@@ -720,10 +1059,8 @@ class DatabaseManager:
         campos_permitidos = {
             "nombre",
             "categoria",
-            "subcategoria",
-            "marca",
             "tamaño_dimensiones",
-            "talla",
+            "stock",
             "stock_minimo",
             "precio_unitario",
             "ubicacion_id",
@@ -744,10 +1081,53 @@ class DatabaseManager:
             "_accion": "Editar producto",
             "_detalle": f"Se editó el producto ID {id_producto}"
         })
-        exito, mensaje, _ = self._mutar("actualizar_producto", datos_limpios)
+
+        if "stock" in datos_limpios:
+            exito, mensaje, _ = self._actualizar_producto_con_stock(
+                datos_limpios
+            )
+        else:
+            exito, mensaje, _ = self._mutar(
+                "actualizar_producto",
+                datos_limpios
+            )
+
         if exito:
             return True, "Producto actualizado con éxito."
         return False, mensaje
+
+    def _actualizar_producto_con_stock(self, datos):
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje, None
+
+        request_id = str(uuid4())
+        try:
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "actualizar_producto_stock_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": request_id,
+                        "p_datos": datos
+                    }
+                ).execute()
+            )
+            return True, "Operación realizada correctamente.", respuesta.data
+        except Exception as e:
+            mensaje_error = self._mensaje_error(e)
+            texto_error = mensaje_error.lower()
+            if "actualizar_producto_stock_app" in texto_error and (
+                "does not exist" in texto_error
+                or "not found" in texto_error
+                or "could not find" in texto_error
+                or "pgrst202" in texto_error
+            ):
+                mensaje_error = (
+                    "Falta ejecutar la migración 009 de ajuste manual de stock "
+                    "en Supabase."
+                )
+            return False, mensaje_error, None
 
     def dar_de_baja_producto(self, id_producto):
         payload = {
@@ -793,7 +1173,8 @@ class DatabaseManager:
         id_producto,
         stock_actual,
         cantidad_movida=1,
-        proyecto="Taller Interno"
+        proyecto=None,
+        comentario=None
     ):
         sesion_ok, mensaje = self._requiere_sesion()
         if not sesion_ok:
@@ -803,6 +1184,14 @@ class DatabaseManager:
             cantidad = int(cantidad_movida)
             if cantidad <= 0:
                 return False, "La cantidad debe ser mayor a cero."
+
+            proyecto = str(proyecto or "").strip()
+            if not proyecto:
+                return False, "Debe seleccionar un proyecto antes de registrar el movimiento."
+
+            comentario_limpio = str(comentario or "").strip() or None
+            if comentario_limpio and len(comentario_limpio) > 1000:
+                return False, "El comentario puede tener como máximo 1.000 caracteres."
 
             request_id = str(uuid4())
             self._ejecutar_con_reintentos(
@@ -817,13 +1206,310 @@ class DatabaseManager:
                         "p_producto_id": str(id_producto),
                         "p_cantidad": cantidad,
                         "p_proyecto": proyecto,
-                        "p_comentario": None
+                        "p_comentario": comentario_limpio
                     }
                 ).execute()
             )
             return True, "Movimiento registrado."
         except Exception as e:
-            return False, str(e)
+            mensaje_error = self._mensaje_error(e)
+            if (
+                tipo_movimiento == TIPO_ENTREGA_HERRAMIENTA_PERSONAL
+                and "tipo de movimiento no permitido" in mensaje_error.casefold()
+            ):
+                mensaje_error = (
+                    "Falta ejecutar la migración 015 de herramientas "
+                    "personales en Supabase."
+                )
+            return False, mensaje_error
+
+    # ============================================================
+    # PGP / CONTENEDORES DE PROYECTO
+    # ============================================================
+    def crear_pgp(
+        self,
+        proyecto,
+        rut_responsable,
+        observacion,
+        items
+    ):
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje, None
+
+        proyecto_limpio = str(proyecto or "").strip()
+        if not proyecto_limpio:
+            return False, "Debe seleccionar un proyecto.", None
+
+        observacion_limpia = str(observacion or "").strip() or None
+        if observacion_limpia and len(observacion_limpia) > 1000:
+            return False, (
+                "La observación puede tener como máximo 1.000 caracteres."
+            ), None
+
+        try:
+            items_limpios = preparar_items_pgp(items, rut_responsable)
+        except ValueError as error:
+            return False, str(error), None
+
+        try:
+            request_id = str(uuid4())
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "crear_pgp_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": request_id,
+                        "p_proyecto": proyecto_limpio,
+                        "p_rut_trabajador": str(
+                            rut_responsable or ""
+                        ).strip(),
+                        "p_observacion": observacion_limpia,
+                        "p_items": items_limpios,
+                    }
+                ).execute()
+            )
+            datos = respuesta.data
+            if isinstance(datos, list):
+                datos = datos[0] if datos else {}
+            codigo = (datos or {}).get("codigo_pgp")
+            texto = (
+                f"PGP {codigo} registrado correctamente."
+                if codigo else
+                "PGP registrado correctamente."
+            )
+            return True, texto, datos
+        except Exception as error:
+            mensaje_error = self._mensaje_error(error)
+            if "crear_pgp_app" in mensaje_error.lower() or (
+                "pgp_contenedores" in mensaje_error.lower()
+            ):
+                mensaje_error = (
+                    "Falta ejecutar la migración "
+                    "013_pgp_contenedores.sql en Supabase."
+                )
+            return False, mensaje_error, None
+
+    def agregar_items_pgp(
+        self,
+        pgp_id,
+        rut_responsable,
+        observacion,
+        items,
+    ):
+        """Agrega nuevas salidas a un PGP existente mediante una RPC atómica."""
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje, None
+
+        try:
+            items_limpios = preparar_items_pgp(items, rut_responsable)
+        except ValueError as error:
+            return False, str(error), None
+
+        observacion_limpia = str(observacion or "").strip() or None
+        if observacion_limpia and len(observacion_limpia) > 1000:
+            return False, (
+                "La observación puede tener como máximo 1.000 caracteres."
+            ), None
+
+        try:
+            request_id = str(uuid4())
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "agregar_items_pgp_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": request_id,
+                        "p_pgp_id": str(pgp_id),
+                        "p_rut_trabajador": str(
+                            rut_responsable or ""
+                        ).strip(),
+                        "p_observacion": observacion_limpia,
+                        "p_items": items_limpios,
+                    },
+                ).execute()
+            )
+            datos = respuesta.data
+            if isinstance(datos, list):
+                datos = datos[0] if datos else {}
+            unidades = int((datos or {}).get("unidades_agregadas") or 0)
+            codigo = (datos or {}).get("codigo_pgp") or "PGP"
+            return True, (
+                f"Se agregaron {unidades} unidades a {codigo}."
+            ), datos
+        except Exception as error:
+            mensaje_error = self._mensaje_error(error)
+            texto_error = mensaje_error.casefold()
+            if "agregar_items_pgp_app" in texto_error or any(
+                marcador in texto_error
+                for marcador in ("pgrst202", "could not find the function")
+            ):
+                mensaje_error = (
+                    "Falta ejecutar la migración "
+                    "016_ampliar_pgp.sql en Supabase."
+                )
+            return False, mensaje_error, None
+
+    def devolver_item_pgp(
+        self,
+        pgp_id,
+        item_id,
+        cantidad,
+        comentario=""
+    ):
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje
+
+        try:
+            cantidad_entera = int(cantidad)
+            if cantidad_entera <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return False, "La cantidad debe ser un entero mayor a cero."
+
+        comentario_limpio = str(comentario or "").strip() or None
+        if comentario_limpio and len(comentario_limpio) > 1000:
+            return False, (
+                "El comentario puede tener como máximo 1.000 caracteres."
+            )
+
+        try:
+            request_id = str(uuid4())
+            self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "devolver_item_pgp_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": request_id,
+                        "p_pgp_id": str(pgp_id),
+                        "p_item_id": int(item_id),
+                        "p_cantidad": cantidad_entera,
+                        "p_comentario": comentario_limpio,
+                    }
+                ).execute()
+            )
+            return True, "Devolución registrada correctamente."
+        except Exception as error:
+            mensaje_error = self._mensaje_error(error)
+            if "devolver_item_pgp_app" in mensaje_error.lower() or (
+                "pgp_items" in mensaje_error.lower()
+            ):
+                mensaje_error = (
+                    "Falta ejecutar la migración "
+                    "013_pgp_contenedores.sql en Supabase."
+                )
+            return False, mensaje_error
+
+    def devolver_pgp_completo(self, pgp_id, comentario=""):
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje
+
+        comentario_limpio = str(comentario or "").strip() or None
+        if comentario_limpio and len(comentario_limpio) > 1000:
+            return False, (
+                "El comentario puede tener como máximo 1.000 caracteres."
+            )
+
+        try:
+            request_id = str(uuid4())
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "devolver_pgp_completo_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": request_id,
+                        "p_pgp_id": str(pgp_id),
+                        "p_comentario": comentario_limpio,
+                    }
+                ).execute()
+            )
+            datos = respuesta.data
+            if isinstance(datos, list):
+                datos = datos[0] if datos else {}
+            unidades = int((datos or {}).get("unidades_devueltas") or 0)
+            return True, f"Se devolvieron {unidades} unidades correctamente."
+        except Exception as error:
+            mensaje_error = self._mensaje_error(error)
+            if "devolver_pgp_completo_app" in mensaje_error.lower() or (
+                "pgp_items" in mensaje_error.lower()
+            ):
+                mensaje_error = (
+                    "Falta volver a ejecutar la migración "
+                    "013_pgp_contenedores.sql en Supabase."
+                )
+            return False, mensaje_error
+
+    def cargar_pgp_contenedores(self):
+        try:
+            filas_pgp = self._cargar_tabla_paginada(
+                "pgp_contenedores",
+                ordenar_por="fecha_creacion",
+                desc=True,
+            )
+            filas_items = self._cargar_tabla_paginada(
+                "pgp_items",
+                ordenar_por="id",
+            )
+
+            items_por_pgp = {}
+            for item in filas_items:
+                item_copia = dict(item)
+                item_copia["fecha_salida"] = formatear_fecha_hora(
+                    item_copia.get("creado_en")
+                )
+                item_copia["cantidad_pendiente"] = (
+                    cantidad_pendiente_item_pgp(item_copia)
+                )
+                items_por_pgp.setdefault(
+                    str(item_copia.get("pgp_id")), []
+                ).append(item_copia)
+
+            contenedores = []
+            for pgp in filas_pgp:
+                pgp_copia = dict(pgp)
+                items_pgp = items_por_pgp.get(str(pgp_copia.get("id")), [])
+                pgp_copia["items"] = items_pgp
+                pgp_copia["cantidad_items"] = len(items_pgp)
+                pgp_copia["cantidad_unidades"] = sum(
+                    int(item.get("cantidad") or 0)
+                    for item in items_pgp
+                )
+                pgp_copia["unidades_pendientes"] = sum(
+                    int(item.get("cantidad_pendiente") or 0)
+                    for item in items_pgp
+                )
+                # Alias temporal para instalaciones que conserven una vista abierta.
+                pgp_copia["prestamos_pendientes"] = pgp_copia[
+                    "unidades_pendientes"
+                ]
+                pgp_copia["fecha"] = formatear_fecha_hora(
+                    pgp_copia.get("fecha_creacion")
+                )
+                contenedores.append(pgp_copia)
+
+            return {
+                "disponible": True,
+                "contenedores": contenedores,
+                "error": None,
+            }
+        except Exception as error:
+            mensaje = self._mensaje_error(error)
+            if any(nombre in mensaje.lower() for nombre in (
+                "pgp_contenedores",
+                "pgp_items",
+            )):
+                mensaje = (
+                    "Falta ejecutar la migración "
+                    "013_pgp_contenedores.sql en Supabase."
+                )
+            return {
+                "disponible": False,
+                "contenedores": [],
+                "error": mensaje,
+            }
 
     def obtener_ultimos_movimientos(self, limite=5):
         try:
@@ -856,12 +1542,7 @@ class DatabaseManager:
             movimientos = []
 
             for t in res_trans.data:
-                fecha_cruda = t.get("fecha_hora") or ""
-
-                if fecha_cruda:
-                    fecha_limpia = str(fecha_cruda)[:16].replace("T", " ")
-                else:
-                    fecha_limpia = "-"
+                fecha_limpia = formatear_fecha_hora(t.get("fecha_hora"))
 
                 producto = (
                     t.get("producto_nombre_snapshot")
@@ -919,12 +1600,7 @@ class DatabaseManager:
             historial = []
 
             for t in res_trans.data:
-                fecha_cruda = t.get("fecha_hora") or "Sin fecha"
-
-                if fecha_cruda != "Sin fecha":
-                    fecha_limpia = str(fecha_cruda)[:16].replace("T", " ")
-                else:
-                    fecha_limpia = "-"
+                fecha_limpia = formatear_fecha_hora(t.get("fecha_hora"))
 
                 nombre_trab = mapa_trab.get(t.get("trabajador_id"), "Sin responsable")
                 nombre_prod = (
@@ -948,9 +1624,301 @@ class DatabaseManager:
             print(f"Error cargando historial: {e}")
             return []
 
+    def obtener_movimientos_estadisticas(self):
+        """Devuelve movimientos enriquecidos para el panel de estadísticas."""
+        try:
+            movimientos = []
+            tamano_pagina = 1000
+            inicio = 0
+
+            while True:
+                respuesta = self._ejecutar_con_reintentos(
+                    lambda inicio=inicio: (
+                        self.supabase
+                        .table("transacciones")
+                        .select(
+                            "producto_id,proyecto_id,trabajador_id,tipo_movimiento,"
+                            "cantidad_movida,fecha_hora,precio_unitario_movimiento,"
+                            "producto_nombre_snapshot,stock_anterior,stock_nuevo,"
+                            "comentario,creado_por_usuario"
+                        )
+                        .order("fecha_hora", desc=True)
+                        .range(inicio, inicio + tamano_pagina - 1)
+                        .execute()
+                    )
+                )
+                pagina = respuesta.data or []
+                movimientos.extend(pagina)
+                if len(pagina) < tamano_pagina:
+                    break
+                inicio += tamano_pagina
+
+            productos = self.cargar_inventario_nube()
+            mapa_productos = {producto.get("id"): producto for producto in productos}
+            proyectos = self.cargar_proyectos_completo()
+            mapa_proyectos = {proyecto.get("id"): proyecto for proyecto in proyectos}
+            trabajadores = self.cargar_trabajadores_nube(solo_activos=False)
+            mapa_trabajadores = {
+                trabajador.get("id"): trabajador for trabajador in trabajadores
+            }
+
+            resultado = []
+            for movimiento in movimientos:
+                producto = mapa_productos.get(movimiento.get("producto_id"), {})
+                proyecto = mapa_proyectos.get(movimiento.get("proyecto_id"), {})
+                trabajador = mapa_trabajadores.get(
+                    movimiento.get("trabajador_id"), {}
+                )
+                precio = movimiento.get("precio_unitario_movimiento")
+                if precio is None:
+                    precio = producto.get("precio_unitario") or 0
+
+                resultado.append({
+                    "producto_id": movimiento.get("producto_id"),
+                    "producto": (
+                        movimiento.get("producto_nombre_snapshot")
+                        or producto.get("nombre")
+                        or "Producto desconocido"
+                    ),
+                    "proyecto": proyecto.get("nombre") or "Sin proyecto",
+                    "trabajador": trabajador.get("nombre") or "Sin responsable",
+                    "tipo_movimiento": movimiento.get("tipo_movimiento"),
+                    "cantidad_movida": movimiento.get("cantidad_movida"),
+                    "fecha_hora": movimiento.get("fecha_hora"),
+                    "precio_unitario": precio,
+                    "stock_anterior": movimiento.get("stock_anterior"),
+                    "stock_nuevo": movimiento.get("stock_nuevo"),
+                    "comentario": movimiento.get("comentario") or "-",
+                    "registrado_por": movimiento.get("creado_por_usuario") or "-",
+                })
+
+            return resultado
+        except Exception as e:
+            print(f"Error cargando movimientos para estadísticas: {e}")
+            return []
+
+    def obtener_historial_precios(self):
+        """Obtiene los cambios reales de precio registrados por la migración 012."""
+        try:
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("historial_precios")
+                    .select(
+                        "id,producto_id,producto_nombre,precio_anterior,"
+                        "precio_nuevo,fecha_hora,usuario_app"
+                    )
+                    .order("fecha_hora", desc=True)
+                    .execute()
+                )
+            )
+            return {
+                "disponible": True,
+                "filas": respuesta.data or [],
+                "error": "",
+            }
+        except Exception as e:
+            mensaje = self._mensaje_error(e)
+            texto = mensaje.casefold()
+            if "historial_precios" in texto and any(marcador in texto for marcador in (
+                "does not exist", "not found", "could not find", "pgrst205"
+            )):
+                mensaje = (
+                    "Falta ejecutar la migración 012 de historial de precios "
+                    "en Supabase."
+                )
+            print(f"Error cargando historial de precios: {mensaje}")
+            return {
+                "disponible": False,
+                "filas": [],
+                "error": mensaje,
+            }
+
+    def obtener_registro_entregas_epp(self):
+        """Devuelve el historial detallado de entregas de productos EPP."""
+        try:
+            res_trans = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("transacciones")
+                    .select("*")
+                    .eq("tipo_movimiento", "Entrega / Consumo")
+                    .order("fecha_hora", desc=True)
+                    .execute()
+                )
+            )
+
+            productos = self.cargar_inventario_nube()
+            productos_epp = {
+                p["id"]: p
+                for p in productos
+                if str(p.get("categoria") or "").strip().casefold() == "epp"
+            }
+
+            trabajadores = self.cargar_trabajadores_nube(solo_activos=False)
+            mapa_trabajadores = {
+                t["id"]: t
+                for t in trabajadores
+            }
+
+            proyectos = self.cargar_proyectos_completo()
+            mapa_proyectos = {
+                p["id"]: p.get("nombre") or "-"
+                for p in proyectos
+            }
+
+            entregas = []
+            for movimiento in res_trans.data or []:
+                # La comprobación local evita mezclar otros movimientos incluso
+                # si un cliente de pruebas o una API antigua ignora el filtro.
+                if movimiento.get("tipo_movimiento") != "Entrega / Consumo":
+                    continue
+
+                producto = productos_epp.get(movimiento.get("producto_id"))
+                if not producto:
+                    continue
+
+                trabajador = mapa_trabajadores.get(
+                    movimiento.get("trabajador_id"),
+                    {}
+                )
+                fecha_cruda = str(movimiento.get("fecha_hora") or "")
+
+                entregas.append({
+                    "id": movimiento.get("id"),
+                    "fecha_hora": fecha_cruda,
+                    "fecha": formatear_fecha_hora(fecha_cruda),
+                    "trabajador_id": movimiento.get("trabajador_id"),
+                    "trabajador": (
+                        trabajador.get("nombre") or "Sin responsable"
+                    ),
+                    "rut": trabajador.get("rut") or "-",
+                    "producto_id": movimiento.get("producto_id"),
+                    "epp": (
+                        movimiento.get("producto_nombre_snapshot")
+                        or producto.get("nombre")
+                        or "EPP desconocido"
+                    ),
+                    "cantidad": int(movimiento.get("cantidad_movida") or 0),
+                    "proyecto": mapa_proyectos.get(
+                        movimiento.get("proyecto_id"),
+                        "-"
+                    ),
+                    "entregado_por": (
+                        movimiento.get("creado_por_usuario") or "-"
+                    ),
+                    "comentario": movimiento.get("comentario") or "-"
+                })
+
+            return entregas
+
+        except Exception as e:
+            print(f"Error cargando registro de entregas EPP: {e}")
+            return []
+
+    def obtener_registro_herramientas_personales(self):
+        """Devuelve las herramientas entregadas permanentemente a trabajadores."""
+        tipo = TIPO_ENTREGA_HERRAMIENTA_PERSONAL
+        try:
+            res_trans = self._ejecutar_con_reintentos(
+                lambda: (
+                    self.supabase
+                    .table("transacciones")
+                    .select("*")
+                    .eq("tipo_movimiento", tipo)
+                    .order("fecha_hora", desc=True)
+                    .execute()
+                )
+            )
+
+            productos = self.cargar_inventario_nube()
+            mapa_productos = {p["id"]: p for p in productos}
+            trabajadores = self.cargar_trabajadores_nube(solo_activos=False)
+            mapa_trabajadores = {t["id"]: t for t in trabajadores}
+            proyectos = self.cargar_proyectos_completo()
+            mapa_proyectos = {
+                p["id"]: p.get("nombre") or "-" for p in proyectos
+            }
+
+            entregas = []
+            for movimiento in res_trans.data or []:
+                if movimiento.get("tipo_movimiento") != tipo:
+                    continue
+
+                producto = mapa_productos.get(
+                    movimiento.get("producto_id"), {}
+                )
+                trabajador = mapa_trabajadores.get(
+                    movimiento.get("trabajador_id"), {}
+                )
+                fecha_cruda = str(movimiento.get("fecha_hora") or "")
+                entregas.append({
+                    "id": movimiento.get("id"),
+                    "fecha_hora": fecha_cruda,
+                    "fecha": formatear_fecha_hora(fecha_cruda),
+                    "trabajador_id": movimiento.get("trabajador_id"),
+                    "trabajador": (
+                        trabajador.get("nombre") or "Trabajador desconocido"
+                    ),
+                    "rut": trabajador.get("rut") or "-",
+                    "producto_id": movimiento.get("producto_id"),
+                    "herramienta": (
+                        movimiento.get("producto_nombre_snapshot")
+                        or producto.get("nombre")
+                        or "Herramienta desconocida"
+                    ),
+                    "cantidad": int(movimiento.get("cantidad_movida") or 0),
+                    "proyecto": mapa_proyectos.get(
+                        movimiento.get("proyecto_id"), "-"
+                    ),
+                    "entregado_por": (
+                        movimiento.get("creado_por_usuario") or "-"
+                    ),
+                    "comentario": movimiento.get("comentario") or "-",
+                })
+
+            return entregas
+        except Exception as e:
+            print(f"Error cargando herramientas personales: {e}")
+            return []
+
     # ============================================================
     # HERRAMIENTAS EN TERRENO
     # ============================================================
+    def _ids_devoluciones_prestamo_pgp(self):
+        """Identifica qué devoluciones PGP corresponden realmente a préstamos."""
+        try:
+            items = self._cargar_tabla_paginada(
+                "pgp_items",
+                columnas="id,tipo_movimiento",
+                ordenar_por="id",
+            )
+            ids_items_prestamo = {
+                str(item.get("id"))
+                for item in items
+                if item.get("tipo_movimiento") == TIPO_PRESTAMO_PGP
+            }
+            if not ids_items_prestamo:
+                return set()
+
+            devoluciones = self._cargar_tabla_paginada(
+                "pgp_devoluciones",
+                columnas="id,pgp_item_id,transaccion_id",
+                ordenar_por="id",
+            )
+            return {
+                str(devolucion.get("transaccion_id"))
+                for devolucion in devoluciones
+                if str(devolucion.get("pgp_item_id")) in ids_items_prestamo
+                and devolucion.get("transaccion_id") is not None
+            }
+        except Exception as error:
+            self._log_db(
+                "no fue posible clasificar devoluciones PGP por tipo: "
+                f"{error}"
+            )
+            return None
+
     def obtener_herramientas_en_terreno(self):
         try:
             movimientos = (
@@ -961,12 +1929,22 @@ class DatabaseManager:
                     "tipo_movimiento",
                     [
                         "Préstamo de Herramienta",
-                        "Devolución de Herramienta"
+                        "Devolución de Herramienta",
+                        TIPO_DEVOLUCION_PGP,
                     ]
                 )
                 .order("fecha_hora")
                 .execute()
             )
+            filas_movimientos = list(movimientos.data or [])
+            ids_devoluciones_prestamo = None
+            if any(
+                movimiento.get("tipo_movimiento") == TIPO_DEVOLUCION_PGP
+                for movimiento in filas_movimientos
+            ):
+                ids_devoluciones_prestamo = (
+                    self._ids_devoluciones_prestamo_pgp()
+                )
 
             productos = self.cargar_inventario_nube()
             mapa_prod = {
@@ -987,7 +1965,7 @@ class DatabaseManager:
 
             estado_herramientas = {}
 
-            for m in movimientos.data:
+            for m in filas_movimientos:
                 llave = (
                     m.get("producto_id"),
                     m.get("trabajador_id")
@@ -1006,7 +1984,16 @@ class DatabaseManager:
                         estado["transaccion"] = m
                     estado["cantidad_pendiente"] += cantidad
 
-                elif m.get("tipo_movimiento") == "Devolución de Herramienta":
+                elif (
+                    m.get("tipo_movimiento") == "Devolución de Herramienta"
+                    or (
+                        m.get("tipo_movimiento") == TIPO_DEVOLUCION_PGP
+                        and (
+                            ids_devoluciones_prestamo is None
+                            or str(m.get("id")) in ids_devoluciones_prestamo
+                        )
+                    )
+                ):
                     estado = estado_herramientas.get(llave)
                     if estado:
                         estado["cantidad_pendiente"] -= cantidad
@@ -1321,13 +2308,24 @@ class DatabaseManager:
     # ============================================================
     # CONSUMO POR PROYECTO
     # ============================================================
+    @staticmethod
+    def convertir_importe(valor):
+        """Convierte importes de Supabase sin perder sus decimales."""
+        if valor is None or valor == "":
+            return Decimal("0")
+        try:
+            return Decimal(str(valor))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0")
+
     def obtener_resumen_consumo_proyecto(self, nombre_proyecto):
         """
         Devuelve resumen agrupado por producto para un proyecto:
-        Producto | Categoría | Cantidad consumida | Valor estimado
+        Producto | Categoría | Cantidad | Precio promedio | Valor total
 
         Solo considera movimientos que representan salida/consumo real:
         - Entrega / Consumo
+        - Entrega de Herramienta Personal
         - Baja por Daño / Merma
         - Corte / Transformación
         """
@@ -1339,6 +2337,7 @@ class DatabaseManager:
 
             movimientos_consumo = [
                 "Entrega / Consumo",
+                "Entrega de Herramienta Personal",
                 "Baja por Daño / Merma",
                 "Corte / Transformación"
             ]
@@ -1367,7 +2366,7 @@ class DatabaseManager:
                 producto = mapa_productos.get(producto_id, {})
 
                 cantidad = int(mov.get("cantidad_movida") or 0)
-                precio = int(
+                precio = self.convertir_importe(
                     mov.get("precio_unitario_movimiento")
                     if mov.get("precio_unitario_movimiento") is not None
                     else producto.get("precio_unitario") or 0
@@ -1390,7 +2389,7 @@ class DatabaseManager:
                             or producto.get("ubicacion_codigo", "-")
                         ),
                         "cantidad": 0,
-                        "valor_estimado": 0
+                        "valor_estimado": Decimal("0")
                     }
 
                 resumen[producto_id]["cantidad"] += cantidad
@@ -1399,12 +2398,18 @@ class DatabaseManager:
             filas = []
 
             for item in resumen.values():
+                precio_promedio = (
+                    item["valor_estimado"] / item["cantidad"]
+                    if item["cantidad"]
+                    else Decimal("0")
+                )
                 filas.append((
                     item["producto"],
                     item["codigo"],
                     item["categoria"],
                     item["ubicacion"],
                     item["cantidad"],
+                    precio_promedio,
                     item["valor_estimado"]
                 ))
 
@@ -1428,6 +2433,7 @@ class DatabaseManager:
 
             movimientos_consumo = [
                 "Entrega / Consumo",
+                "Entrega de Herramienta Personal",
                 "Baja por Daño / Merma",
                 "Corte / Transformación"
             ]
@@ -1461,15 +2467,10 @@ class DatabaseManager:
                 producto = mapa_productos.get(mov.get("producto_id"), {})
                 trabajador = mapa_trabajadores.get(mov.get("trabajador_id"), {})
 
-                fecha_cruda = mov.get("fecha_hora") or ""
-
-                if fecha_cruda:
-                    fecha = str(fecha_cruda)[:16].replace("T", " ")
-                else:
-                    fecha = "-"
+                fecha = formatear_fecha_hora(mov.get("fecha_hora"))
 
                 cantidad = int(mov.get("cantidad_movida") or 0)
-                precio = int(
+                precio = self.convertir_importe(
                     mov.get("precio_unitario_movimiento")
                     if mov.get("precio_unitario_movimiento") is not None
                     else producto.get("precio_unitario") or 0
@@ -1482,6 +2483,7 @@ class DatabaseManager:
                     mov.get("producto_codigo_snapshot") or producto.get("codigo_barras", "-"),
                     mov.get("tipo_movimiento", "-"),
                     cantidad,
+                    precio,
                     valor,
                     trabajador.get("nombre", "Sin responsable"),
                     mov.get("ubicacion_snapshot") or producto.get("ubicacion_codigo", "-")
@@ -1503,7 +2505,7 @@ class DatabaseManager:
 
             for fila in resumen:
                 total_cantidad += int(fila[4] or 0)
-                total_valor += int(fila[5] or 0)
+                total_valor += self.convertir_importe(fila[6])
 
             return {
                 "productos_distintos": total_items,

@@ -1,69 +1,87 @@
 import customtkinter as ctk
+from utils.ui_windows import VentanaAdaptable
 from tkinter import ttk, messagebox
 import threading
 from datetime import date
+from utils.ui_dispatcher import ejecutar_en_ui, iniciar_despachador_ui
+from utils.ui_theme import (
+    PALETA,
+    color_estado,
+    estilos_barra,
+    estilos_boton,
+    estilos_panel,
+    estilizar_treeview,
+)
 
 
 class ProyectosTab(ctk.CTkFrame):
     def __init__(self, master, db_manager):
         super().__init__(master, fg_color="transparent")
         self.db = db_manager
+        iniciar_despachador_ui(self)
         self.crear_interfaz()
         self.after(2500, self.iniciar_carga_hilo)
 
     def crear_interfaz(self):
-        frame_top = ctk.CTkFrame(self, fg_color="transparent")
+        frame_top = ctk.CTkFrame(self, **estilos_barra())
         frame_top.pack(fill="x", pady=10, padx=10)
 
+        fila_principal = ctk.CTkFrame(frame_top, fg_color="transparent")
+        fila_principal.pack(fill="x", padx=12, pady=(10, 4))
+
+        fila_estados = ctk.CTkFrame(frame_top, fg_color="transparent")
+        fila_estados.pack(fill="x", padx=12, pady=(4, 10))
+
         ctk.CTkButton(
-            frame_top,
+            fila_principal,
             text="Refrescar",
+            **estilos_boton("primario"),
             command=self.iniciar_carga_hilo
         ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            frame_top,
+            fila_principal,
             text="+ Nuevo Proyecto",
-            fg_color="green",
-            hover_color="darkgreen",
+            **estilos_boton("primario"),
             command=self.abrir_formulario_proyecto
         ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            frame_top,
+            fila_principal,
             text="Editar Seleccionado",
-            fg_color="#24608a",
+            **estilos_boton("primario"),
             command=self.abrir_formulario_edicion
         ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            frame_top,
+            fila_estados,
             text="Inactivar",
-            fg_color="#8B0000",
-            hover_color="#5C0000",
+            **estilos_boton("peligro"),
             command=lambda: self.cambiar_estado_proyecto("Inactivo")
         ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            frame_top,
+            fila_estados,
             text="Finalizar",
-            fg_color="#B8860B",
-            hover_color="#8B6508",
+            **estilos_boton("alerta"),
             command=lambda: self.cambiar_estado_proyecto("Finalizado")
         ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            frame_top,
+            fila_estados,
             text="Reactivar",
-            fg_color="#1f538d",
-            hover_color="#163c65",
+            **estilos_boton("fantasma"),
             command=lambda: self.cambiar_estado_proyecto("Activo")
         ).pack(side="left", padx=5)
 
-        self.label_estado = ctk.CTkLabel(frame_top, text="", text_color="blue")
-        self.label_estado.pack(side="left", padx=10)
+        self.label_estado = ctk.CTkLabel(
+            fila_principal,
+            text="",
+            text_color=color_estado("info")
+        )
+        self.label_estado.pack(side="right", padx=10)
 
-        frame_tabla = ctk.CTkFrame(self)
+        frame_tabla = ctk.CTkFrame(self, **estilos_panel())
         frame_tabla.pack(fill="both", expand=True, padx=10, pady=10)
 
         scrollbar = ctk.CTkScrollbar(frame_tabla, orientation="vertical")
@@ -82,7 +100,6 @@ class ProyectosTab(ctk.CTkFrame):
 
         columnas_visibles = (
             "Nombre",
-            "OT",
             "Cliente",
             "Estado",
             "Fecha Inicio",
@@ -103,7 +120,6 @@ class ProyectosTab(ctk.CTkFrame):
 
         anchos = {
             "Nombre": 220,
-            "OT": 120,
             "Cliente": 160,
             "Estado": 100,
             "Fecha Inicio": 100,
@@ -114,10 +130,9 @@ class ProyectosTab(ctk.CTkFrame):
         for col in columnas_visibles:
             self.tabla.heading(col, text=col)
             self.tabla.column(col, width=anchos[col], anchor="center")
+        self.tabla.heading("Fecha Fin", text="Fecha Término")
 
-        self.tabla.tag_configure("activo", background="#FFFFFF")
-        self.tabla.tag_configure("inactivo", background="#D3D3D3", foreground="gray")
-        self.tabla.tag_configure("finalizado", background="#FFF2CC", foreground="black")
+        estilizar_treeview(self.tabla)
 
         self.tabla.pack(side="left", fill="both", expand=True)
 
@@ -147,7 +162,10 @@ class ProyectosTab(ctk.CTkFrame):
     # CARGA
     # ============================================================
     def iniciar_carga_hilo(self):
-        self.label_estado.configure(text="Cargando proyectos...", text_color="orange")
+        self.label_estado.configure(
+            text="Cargando proyectos...",
+            text_color=color_estado("cargando")
+        )
 
         for item in self.tabla.get_children():
             self.tabla.delete(item)
@@ -179,13 +197,13 @@ class ProyectosTab(ctk.CTkFrame):
                     p.get("cliente", "") or "-",
                     estado,
                     p.get("fecha_inicio", "") or "-",
-                    p.get("fecha_fin", "") or "-",
+                    (p.get("fecha_fin") or "-") if estado == "Finalizado" else "-",
                     p.get("descripcion", "") or "-"
                 ),
                 "tag": tag
             })
 
-        self.after(0, self.actualizar_tabla, filas)
+        ejecutar_en_ui(self, self.actualizar_tabla, filas)
 
     def actualizar_tabla(self, filas):
         for f in filas:
@@ -196,7 +214,10 @@ class ProyectosTab(ctk.CTkFrame):
                 tags=(f["tag"],)
             )
 
-        self.label_estado.configure(text=f"{len(filas)} proyectos.", text_color="green")
+        self.label_estado.configure(
+            text=f"{len(filas)} proyectos.",
+            text_color=color_estado("ok")
+        )
 
     # ============================================================
     # NUEVO PROYECTO
@@ -208,64 +229,67 @@ class ProyectosTab(ctk.CTkFrame):
             raise ValueError("La fecha de término no puede ser anterior al inicio.")
 
     def abrir_formulario_proyecto(self):
-        self.ventana_proyecto = ctk.CTkToplevel(self)
+        self.ventana_proyecto = VentanaAdaptable(self)
         self.ventana_proyecto.title("Nuevo Proyecto")
         self.ventana_proyecto.geometry("450x520")
         self.ventana_proyecto.grab_set()
+        self.ventana_proyecto.configure(fg_color=PALETA["fondo"])
+        panel = ctk.CTkScrollableFrame(self.ventana_proyecto, fg_color=PALETA["fondo"])
+        panel.pack(fill="both", expand=True, padx=10, pady=10)
+
 
         ctk.CTkLabel(
-            self.ventana_proyecto,
+            panel,
             text="Crear Proyecto",
-            font=ctk.CTkFont(size=20, weight="bold")
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=PALETA["primario"]
         ).pack(pady=15)
 
         self.entry_nombre = ctk.CTkEntry(
-            self.ventana_proyecto,
+            panel,
             placeholder_text="Nombre del proyecto",
             width=350
         )
         self.entry_nombre.pack(pady=6)
 
         self.entry_ot = ctk.CTkEntry(
-            self.ventana_proyecto,
+            panel,
             placeholder_text="OT",
             width=350
         )
         self.entry_ot.pack(pady=6)
 
         self.entry_cliente = ctk.CTkEntry(
-            self.ventana_proyecto,
+            panel,
             placeholder_text="Cliente",
             width=350
         )
         self.entry_cliente.pack(pady=6)
 
         self.entry_fecha_inicio = ctk.CTkEntry(
-            self.ventana_proyecto,
+            panel,
             placeholder_text="Fecha inicio YYYY-MM-DD",
             width=350
         )
         self.entry_fecha_inicio.pack(pady=6)
 
-        self.entry_fecha_fin = ctk.CTkEntry(
-            self.ventana_proyecto,
-            placeholder_text="Fecha fin YYYY-MM-DD",
-            width=350
-        )
-        self.entry_fecha_fin.pack(pady=6)
+        ctk.CTkLabel(
+            panel,
+            text="Fecha de término: automática al finalizar",
+            text_color=PALETA["texto_suave"],
+        ).pack(pady=6)
 
         self.entry_descripcion = ctk.CTkEntry(
-            self.ventana_proyecto,
+            panel,
             placeholder_text="Descripción",
             width=350
         )
         self.entry_descripcion.pack(pady=6)
 
         ctk.CTkButton(
-            self.ventana_proyecto,
+            panel,
             text="Guardar Proyecto",
-            fg_color="green",
-            hover_color="darkgreen",
+            **estilos_boton("primario"),
             height=45,
             command=self.guardar_proyecto
         ).pack(pady=20)
@@ -275,7 +299,7 @@ class ProyectosTab(ctk.CTkFrame):
         ot = self.entry_ot.get().strip()
         cliente = self.entry_cliente.get().strip()
         fecha_inicio = self.entry_fecha_inicio.get().strip()
-        fecha_fin = self.entry_fecha_fin.get().strip()
+        fecha_fin = ""
         descripcion = self.entry_descripcion.get().strip()
 
         if not nombre:
@@ -325,31 +349,36 @@ class ProyectosTab(ctk.CTkFrame):
 
         self.proyecto_editando_id = valores[0]
 
-        self.ventana_editar = ctk.CTkToplevel(self)
+        self.ventana_editar = VentanaAdaptable(self)
         self.ventana_editar.title("Editar Proyecto")
         self.ventana_editar.geometry("450x560")
         self.ventana_editar.grab_set()
+        self.ventana_editar.configure(fg_color=PALETA["fondo"])
+        panel = ctk.CTkScrollableFrame(self.ventana_editar, fg_color=PALETA["fondo"])
+        panel.pack(fill="both", expand=True, padx=10, pady=10)
+
 
         ctk.CTkLabel(
-            self.ventana_editar,
+            panel,
             text="Editar Proyecto",
-            font=ctk.CTkFont(size=20, weight="bold")
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=PALETA["primario"]
         ).pack(pady=15)
 
-        self.ed_nombre = ctk.CTkEntry(self.ventana_editar, width=350)
+        self.ed_nombre = ctk.CTkEntry(panel, width=350)
         self.ed_nombre.insert(0, valores[1])
         self.ed_nombre.pack(pady=6)
 
-        self.ed_ot = ctk.CTkEntry(self.ventana_editar, width=350)
+        self.ed_ot = ctk.CTkEntry(panel, width=350)
         self.ed_ot.insert(0, "" if valores[2] == "-" else valores[2])
         self.ed_ot.pack(pady=6)
 
-        self.ed_cliente = ctk.CTkEntry(self.ventana_editar, width=350)
+        self.ed_cliente = ctk.CTkEntry(panel, width=350)
         self.ed_cliente.insert(0, "" if valores[3] == "-" else valores[3])
         self.ed_cliente.pack(pady=6)
 
         self.ed_estado = ctk.CTkComboBox(
-            self.ventana_editar,
+            panel,
             values=["Activo", "Inactivo", "Finalizado"],
             width=350,
             state="readonly"
@@ -357,22 +386,28 @@ class ProyectosTab(ctk.CTkFrame):
         self.ed_estado.set(valores[4])
         self.ed_estado.pack(pady=6)
 
-        self.ed_fecha_inicio = ctk.CTkEntry(self.ventana_editar, width=350)
+        self.ed_fecha_inicio = ctk.CTkEntry(panel, width=350)
         self.ed_fecha_inicio.insert(0, "" if valores[5] == "-" else valores[5])
         self.ed_fecha_inicio.pack(pady=6)
 
-        self.ed_fecha_fin = ctk.CTkEntry(self.ventana_editar, width=350)
+        self.ed_fecha_fin = ctk.CTkEntry(panel, width=350)
         self.ed_fecha_fin.insert(0, "" if valores[6] == "-" else valores[6])
+        self.ed_fecha_fin.configure(state="disabled")
         self.ed_fecha_fin.pack(pady=6)
+        ctk.CTkLabel(
+            panel,
+            text="Fecha de término: automática al finalizar",
+            text_color=PALETA["texto_suave"],
+        ).pack(pady=4)
 
-        self.ed_descripcion = ctk.CTkEntry(self.ventana_editar, width=350)
+        self.ed_descripcion = ctk.CTkEntry(panel, width=350)
         self.ed_descripcion.insert(0, "" if valores[7] == "-" else valores[7])
         self.ed_descripcion.pack(pady=6)
 
         ctk.CTkButton(
-            self.ventana_editar,
+            panel,
             text="Guardar Cambios",
-            fg_color="#24608a",
+            **estilos_boton("primario"),
             height=45,
             command=self.guardar_edicion
         ).pack(pady=20)
@@ -388,7 +423,7 @@ class ProyectosTab(ctk.CTkFrame):
             )
 
         fecha_inicio = self.ed_fecha_inicio.get().strip()
-        fecha_fin = self.ed_fecha_fin.get().strip()
+        fecha_fin = ""
         try:
             self.validar_fechas(fecha_inicio, fecha_fin)
         except ValueError as e:
@@ -404,7 +439,6 @@ class ProyectosTab(ctk.CTkFrame):
             "cliente": self.ed_cliente.get().strip(),
             "estado": self.ed_estado.get(),
             "fecha_inicio": fecha_inicio or None,
-            "fecha_fin": fecha_fin or None,
             "descripcion": self.ed_descripcion.get().strip()
         }
 

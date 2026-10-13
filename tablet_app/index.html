@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d4ed8">
+  <meta name="description" content="Consulta de artículos de bodega para tablet">
+  <title>Bodega · Consulta de artículos</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="48" height="48">
+      <div>
+        <p class="eyebrow">Sistema de bodega</p>
+        <h1>Consulta de artículos</h1>
+      </div>
+    </div>
+
+    <div class="header-actions" aria-label="Controles de la aplicación">
+      <div class="zoom-control" aria-label="Tamaño del texto">
+        <button id="zoom-out" class="icon-button" type="button" aria-label="Reducir texto">A−</button>
+        <button id="zoom-reset" class="zoom-value" type="button" aria-label="Restablecer tamaño">100%</button>
+        <button id="zoom-in" class="icon-button" type="button" aria-label="Aumentar texto">A+</button>
+      </div>
+      <button id="install-button" class="button button-secondary" type="button" hidden>Instalar</button>
+      <button id="refresh-button" class="button button-primary" type="button">
+        <span class="refresh-icon" aria-hidden="true">↻</span>
+        Actualizar
+      </button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="status-row" aria-live="polite">
+      <div id="connection-status" class="connection-badge online">
+        <span class="status-dot"></span>
+        <span>En línea</span>
+      </div>
+      <p id="last-update">Esperando actualización</p>
+    </section>
+
+    <section class="control-panel" aria-label="Búsqueda y filtros">
+      <div class="search-wrap">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="m21 21-4.35-4.35m2.35-5.15A7.5 7.5 0 1 1 4 11.5a7.5 7.5 0 0 1 15 0Z"/>
+        </svg>
+        <input
+          id="search-input"
+          type="search"
+          inputmode="search"
+          autocomplete="off"
+          placeholder="Buscar por nombre, categoría, ubicación o medida"
+          aria-label="Buscar artículos"
+        >
+        <button id="clear-search" class="clear-search" type="button" aria-label="Limpiar búsqueda" hidden>×</button>
+      </div>
+
+      <div class="filter-row">
+        <div id="category-filters" class="category-filters" aria-label="Filtrar por categoría"></div>
+        <label class="status-filter">
+          <span>Estado</span>
+          <select id="status-select">
+            <option value="todos">Todos</option>
+            <option value="activo">Activos</option>
+            <option value="inactivo">Inactivos</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="results-heading">
+      <div>
+        <p class="eyebrow">Inventario</p>
+        <h2 id="result-title">Todos los artículos</h2>
+      </div>
+      <div class="result-count">
+        <strong id="result-count">0</strong>
+        <span id="result-label">artículos</span>
+      </div>
+    </section>
+
+    <section id="message-panel" class="message-panel" hidden aria-live="assertive">
+      <div class="message-icon" aria-hidden="true">!</div>
+      <div>
+        <h2 id="message-title">No se pudo cargar el inventario</h2>
+        <p id="message-text"></p>
+      </div>
+    </section>
+
+    <section id="loading-grid" class="item-grid" aria-label="Cargando artículos">
+      <article class="item-card skeleton"></article>
+      <article class="item-card skeleton"></article>
+      <article class="item-card skeleton"></article>
+      <article class="item-card skeleton"></article>
+      <article class="item-card skeleton"></article>
+      <article class="item-card skeleton"></article>
+    </section>
+
+    <section id="item-grid" class="item-grid" aria-live="polite" hidden></section>
+
+    <section id="empty-state" class="empty-state" hidden>
+      <div class="empty-symbol" aria-hidden="true">⌕</div>
+      <h2>No encontramos artículos</h2>
+      <p>Prueba con otra palabra o cambia los filtros seleccionados.</p>
+      <button id="reset-filters" class="button button-secondary" type="button">Limpiar filtros</button>
+    </section>
+  </main>
+
+  <template id="item-template">
+    <article class="item-card">
+      <div class="card-topline">
+        <span class="category-badge"></span>
+        <span class="state-badge"></span>
+      </div>
+      <h3 class="item-name"></h3>
+      <div class="stock-block">
+        <span class="stock-label">Stock disponible</span>
+        <strong class="stock-value"></strong>
+      </div>
+      <dl class="item-details">
+        <div class="detail-row location-row">
+          <dt>Ubicación</dt>
+          <dd class="location-value"></dd>
+        </div>
+        <div class="detail-row measurement-row">
+          <dt>Formato y medidas</dt>
+          <dd class="measurement-value"></dd>
+        </div>
+      </dl>
+    </article>
+  </template>
+
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

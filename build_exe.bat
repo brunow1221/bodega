@@ -16,7 +16,7 @@ pyinstaller ^
 --add-data "assets\icono.ico;assets" ^
 --add-data "database\migrations;database\migrations" ^
 --add-data "MIGRACION_SEGURIDAD.md;." ^
---collect-data barcode ^
+--collect-all tzdata ^
 main.py
 
 echo.

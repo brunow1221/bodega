@@ -1,8 +1,16 @@
 import customtkinter as ctk
+from utils.ui_windows import VentanaAdaptable
 from tkinter import ttk, messagebox
-from PIL import Image
-import os
 import threading
+from utils.ui_dispatcher import ejecutar_en_ui, iniciar_despachador_ui
+from utils.ui_theme import (
+    PALETA,
+    color_estado,
+    estilos_barra,
+    estilos_boton,
+    estilos_panel,
+    estilizar_treeview,
+)
 
 
 def validar_rut_chileno(rut):
@@ -32,41 +40,38 @@ def validar_rut_chileno(rut):
 
 
 class TrabajadoresTab(ctk.CTkFrame):
-    def __init__(self, master, db_manager, barcode_gen):
+    def __init__(self, master, db_manager):
         super().__init__(master, fg_color="transparent")
         self.db = db_manager
-        self.barcode = barcode_gen
+        iniciar_despachador_ui(self)
         self.crear_interfaz()
 
     def crear_interfaz(self):
-        frame_top = ctk.CTkFrame(self, fg_color="transparent")
+        frame_top = ctk.CTkFrame(self, **estilos_barra())
         frame_top.pack(fill="x", pady=10, padx=10)
 
         ctk.CTkButton(
             frame_top,
             text="Refrescar Lista",
+            **estilos_boton("primario"),
             command=self.iniciar_carga_hilo
         ).pack(side="left")
 
-        self.label_estado = ctk.CTkLabel(frame_top, text="", text_color="blue")
+        self.label_estado = ctk.CTkLabel(
+            frame_top,
+            text="",
+            text_color=color_estado("info")
+        )
         self.label_estado.pack(side="left", padx=10)
 
         ctk.CTkButton(
             frame_top,
-            text="Ver Código QR",
-            fg_color="#1f538d",
-            command=self.ver_qr_trabajador
-        ).pack(side="left", padx=10)
-
-        ctk.CTkButton(
-            frame_top,
             text="+ Nuevo Trabajador",
-            fg_color="green",
-            hover_color="darkgreen",
+            **estilos_boton("primario"),
             command=self.abrir_formulario_trabajador
         ).pack(side="right")
 
-        frame_tabla = ctk.CTkFrame(self)
+        frame_tabla = ctk.CTkFrame(self, **estilos_panel())
         frame_tabla.pack(fill="both", expand=True, padx=10, pady=10)
 
         scrollbar = ctk.CTkScrollbar(frame_tabla, orientation="vertical")
@@ -81,6 +86,7 @@ class TrabajadoresTab(ctk.CTkFrame):
             height=15,
             yscrollcommand=scrollbar.set
         )
+        estilizar_treeview(self.tabla_trabajadores)
 
         scrollbar.configure(command=self.tabla_trabajadores.yview)
 
@@ -100,7 +106,10 @@ class TrabajadoresTab(ctk.CTkFrame):
         self.after(3000, self.iniciar_carga_hilo)
 
     def iniciar_carga_hilo(self):
-        self.label_estado.configure(text="Cargando...", text_color="orange")
+        self.label_estado.configure(
+            text="Cargando...",
+            text_color=color_estado("cargando")
+        )
 
         for item in self.tabla_trabajadores.get_children():
             self.tabla_trabajadores.delete(item)
@@ -123,111 +132,48 @@ class TrabajadoresTab(ctk.CTkFrame):
                 t.get("estado", "Activo")
             ))
 
-        self.after(0, self.actualizar_interfaz_tabla, filas)
+        ejecutar_en_ui(self, self.actualizar_interfaz_tabla, filas)
 
     def actualizar_interfaz_tabla(self, filas):
         for f in filas:
             self.tabla_trabajadores.insert("", "end", values=f)
 
-        self.label_estado.configure(text=f"{len(filas)} trab.", text_color="green")
-
-    def ver_qr_trabajador(self):
-        seleccion = self.tabla_trabajadores.selection()
-
-        if not seleccion:
-            return messagebox.showwarning(
-                "Aviso",
-                "Seleccione un trabajador para ver su QR."
-            )
-
-        item = self.tabla_trabajadores.item(seleccion[0])
-
-        rut = str(item["values"][0])
-        nombre = str(item["values"][1])
-
-        ruta_imagen = self.barcode.obtener_ruta_qr_trabajador(rut, nombre)
-
-        if not os.path.exists(ruta_imagen):
-            respuesta = messagebox.askyesno(
-                "QR no encontrado",
-                "No se encontró la imagen del QR en este computador.\n\n"
-                "¿Desea generarla nuevamente?"
-            )
-
-            if respuesta:
-                creado = self.barcode.generar_qr_trabajador(rut, nombre)
-
-                if not creado:
-                    return messagebox.showerror(
-                        "Error",
-                        "No se pudo generar el QR del trabajador."
-                    )
-            else:
-                return
-
-        ventana_img = ctk.CTkToplevel(self)
-        ventana_img.title(f"QR de {nombre}")
-        ventana_img.geometry("400x420")
-        ventana_img.grab_set()
-
-        img_pil = Image.open(ruta_imagen)
-
-        img = ctk.CTkImage(
-            light_image=img_pil,
-            dark_image=img_pil,
-            size=(250, 250)
+        self.label_estado.configure(
+            text=f"{len(filas)} trab.",
+            text_color=color_estado("ok")
         )
 
-        ctk.CTkLabel(
-            ventana_img,
-            image=img,
-            text=""
-        ).pack(pady=20)
-
-        ctk.CTkLabel(
-            ventana_img,
-            text=f"{nombre}\n{rut}",
-            font=ctk.CTkFont(size=14, weight="bold")
-        ).pack(pady=(0, 10))
-
-        ctk.CTkButton(
-            ventana_img,
-            text="Descargar / Imprimir Credencial",
-            command=lambda: self.barcode.exportar_archivo(
-                ruta_imagen,
-                f"{rut}.png",
-                ventana_img
-            )
-        ).pack(pady=10)
-
     def abrir_formulario_trabajador(self):
-        ventana = ctk.CTkToplevel(self)
+        ventana = VentanaAdaptable(self)
         ventana.title("Registrar Trabajador")
         ventana.geometry("400x400")
         ventana.grab_set()
+        panel = ctk.CTkScrollableFrame(ventana, fg_color=PALETA["fondo"])
+        panel.pack(fill="both", expand=True, padx=10, pady=10)
+
 
         ctk.CTkLabel(
-            ventana,
+            panel,
             text="Nuevo Trabajador",
             font=ctk.CTkFont(size=20, weight="bold")
         ).pack(pady=15)
 
         entry_rut = ctk.CTkEntry(
-            ventana,
+            panel,
             placeholder_text="RUT (Ej: 12345678-9)",
             width=300
         )
         entry_rut.pack(pady=10)
 
         entry_nombre = ctk.CTkEntry(
-            ventana,
+            panel,
             placeholder_text="Nombre Completo",
             width=300
         )
         entry_nombre.pack(pady=10)
 
         entry_cargo = ctk.CTkEntry(
-            ventana,
+            panel,
             placeholder_text="Cargo (Ej: Soldador, Eléctrico)",
             width=300
         )
@@ -255,23 +201,12 @@ class TrabajadoresTab(ctk.CTkFrame):
             exito, msg = self.db.guardar_trabajador_nube(rut, nombre, cargo)
 
             if exito:
-                qr_creado = self.barcode.generar_qr_trabajador(rut, nombre)
-
-                if qr_creado:
-                    messagebox.showinfo(
-                        "Éxito",
-                        f"{msg}\n\nEl QR fue creado en:\n{self.barcode.workers_dir}",
-                        parent=ventana
-                    )
-                else:
-                    messagebox.showwarning(
-                        "Trabajador guardado",
-                        "El trabajador fue guardado, pero no se pudo crear el QR.",
-                        parent=ventana
-                    )
-
+                messagebox.showinfo("Éxito", msg, parent=ventana)
                 ventana.destroy()
                 self.after(3000, self.iniciar_carga_hilo)
+                app = self.winfo_toplevel()
+                if hasattr(app, "vista_salidas"):
+                    app.vista_salidas.iniciar_carga_selectores()
 
             else:
                 messagebox.showerror(
@@ -281,9 +216,8 @@ class TrabajadoresTab(ctk.CTkFrame):
                 )
 
         ctk.CTkButton(
-            ventana,
+            panel,
             text="Guardar",
-            fg_color="green",
-            hover_color="darkgreen",
+            **estilos_boton("primario"),
             command=guardar
         ).pack(pady=20)

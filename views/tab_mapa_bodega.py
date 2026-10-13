@@ -1,6 +1,17 @@
 import customtkinter as ctk
+from utils.ui_windows import VentanaAdaptable
 from tkinter import ttk, messagebox
 import threading
+import re
+from utils.ui_dispatcher import ejecutar_en_ui, iniciar_despachador_ui
+from utils.ui_theme import (
+    PALETA,
+    color_estado,
+    estilos_barra,
+    estilos_boton,
+    estilos_panel,
+    estilizar_treeview,
+)
 
 
 class MapaBodegaTab(ctk.CTkFrame):
@@ -8,6 +19,7 @@ class MapaBodegaTab(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
 
         self.db = db_manager
+        iniciar_despachador_ui(self)
 
         self.bodegas = []
         self.racks = []
@@ -29,19 +41,26 @@ class MapaBodegaTab(ctk.CTkFrame):
         # =========================
         # BARRA SUPERIOR
         # =========================
-        frame_top = ctk.CTkFrame(self, fg_color="transparent")
+        frame_top = ctk.CTkFrame(self, **estilos_barra())
         frame_top.grid(row=0, column=0, sticky="ew", padx=15, pady=10)
 
+        fila_titulo = ctk.CTkFrame(frame_top, fg_color="transparent")
+        fila_titulo.pack(fill="x", padx=12, pady=(10, 4))
+
+        fila_controles = ctk.CTkFrame(frame_top, fg_color="transparent")
+        fila_controles.pack(fill="x", padx=12, pady=(4, 10))
+
         ctk.CTkLabel(
-            frame_top,
-            text="Mapa de Bodega / Vista Rack",
-            font=ctk.CTkFont(size=20, weight="bold")
+            fila_titulo,
+            text="Mapa de Bodega / Sectores y Estantes",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=PALETA["primario"]
         ).pack(side="left", padx=(0, 20))
 
-        ctk.CTkLabel(frame_top, text="Bodega:").pack(side="left", padx=(5, 5))
+        ctk.CTkLabel(fila_controles, text="Bodega:").pack(side="left", padx=(5, 5))
 
         self.combo_bodega = ctk.CTkComboBox(
-            frame_top,
+            fila_controles,
             values=[],
             width=180,
             state="readonly",
@@ -49,60 +68,60 @@ class MapaBodegaTab(ctk.CTkFrame):
         )
         self.combo_bodega.pack(side="left", padx=5)
 
-        ctk.CTkLabel(frame_top, text="Rack:").pack(side="left", padx=(15, 5))
+        ctk.CTkLabel(fila_controles, text="Sector:").pack(side="left", padx=(15, 5))
 
         self.combo_rack = ctk.CTkComboBox(
-            frame_top,
+            fila_controles,
             values=[],
-            width=160,
+            width=220,
             state="readonly",
             command=self.al_cambiar_rack
         )
         self.combo_rack.pack(side="left", padx=5)
 
         ctk.CTkButton(
-            frame_top,
+            fila_controles,
             text="Actualizar",
             width=100,
+            **estilos_boton("primario"),
             command=self.cargar_mapa_actual
         ).pack(side="left", padx=15)
 
         self.btn_administrar_racks = ctk.CTkButton(
-            frame_top,
-            text="Administrar racks",
+            fila_controles,
+            text="Administrar sectores",
             width=135,
-            fg_color="#24608a",
-            hover_color="#17415f",
+            **estilos_boton("fantasma"),
             command=self.abrir_gestor_racks
         )
         self.btn_administrar_racks.pack(side="left", padx=(0, 10))
 
         self.label_estado = ctk.CTkLabel(
-            frame_top,
+            fila_titulo,
             text="",
-            text_color="gray"
+            text_color=color_estado("suave")
         )
-        self.label_estado.pack(side="left", padx=10)
+        self.label_estado.pack(side="right", padx=10)
 
         # =========================
         # CONTENEDOR PRINCIPAL
         # =========================
-        self.frame_principal = ctk.CTkFrame(self)
+        self.frame_principal = ctk.CTkFrame(self, **estilos_panel())
         self.frame_principal.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
 
         self.frame_principal.grid_columnconfigure(0, weight=2)
         self.frame_principal.grid_columnconfigure(1, weight=1)
         self.frame_principal.grid_rowconfigure(0, weight=1)
 
-        # Izquierda: rack
-        self.frame_rack = ctk.CTkFrame(self.frame_principal, corner_radius=15)
+        # Izquierda: módulos y estantes del sector
+        self.frame_rack = ctk.CTkFrame(self.frame_principal, **estilos_panel())
         self.frame_rack.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
 
         self.frame_rack.grid_columnconfigure((0, 1, 2), weight=1)
         self.frame_rack.grid_rowconfigure((0, 1, 2), weight=1)
 
         # Derecha: detalle
-        self.frame_detalle = ctk.CTkFrame(self.frame_principal, corner_radius=15)
+        self.frame_detalle = ctk.CTkFrame(self.frame_principal, **estilos_panel())
         self.frame_detalle.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
 
         self.frame_detalle.grid_columnconfigure(0, weight=1)
@@ -110,25 +129,26 @@ class MapaBodegaTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self.frame_detalle,
-            text="Detalle de ubicación",
-            font=ctk.CTkFont(size=18, weight="bold")
+            text="Detalle del estante",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=PALETA["primario"]
         ).grid(row=0, column=0, pady=(15, 5), padx=10, sticky="ew")
 
         self.label_detalle = ctk.CTkLabel(
             self.frame_detalle,
-            text="Seleccione una ubicación del rack.",
-            text_color="gray",
+            text="Seleccione un estante del sector.",
+            text_color=color_estado("suave"),
             wraplength=330
         )
         self.label_detalle.grid(row=1, column=0, pady=(0, 10), padx=10, sticky="ew")
 
-        self.frame_tabla_productos = ctk.CTkFrame(self.frame_detalle)
+        self.frame_tabla_productos = ctk.CTkFrame(self.frame_detalle, **estilos_panel())
         self.frame_tabla_productos.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
 
         self.frame_tabla_productos.grid_columnconfigure(0, weight=1)
         self.frame_tabla_productos.grid_rowconfigure(0, weight=1)
 
-        columnas = ("Producto/Sububicación", "Stock", "Categoría", "Código")
+        columnas = ("Producto", "Stock", "Categoría", "Código")
 
         self.tabla_productos = ttk.Treeview(
             self.frame_tabla_productos,
@@ -136,9 +156,10 @@ class MapaBodegaTab(ctk.CTkFrame):
             show="headings",
             height=10
         )
+        estilizar_treeview(self.tabla_productos)
 
         anchos = {
-            "Producto/Sububicación": 180,
+            "Producto": 180,
             "Stock": 60,
             "Categoría": 100,
             "Código": 110
@@ -149,16 +170,6 @@ class MapaBodegaTab(ctk.CTkFrame):
             self.tabla_productos.column(col, width=anchos[col], anchor="center")
 
         self.tabla_productos.grid(row=0, column=0, sticky="nsew")
-
-        self.btn_subdividir = ctk.CTkButton(
-            self.frame_detalle,
-            text="Crear 4 subdivisiones",
-            fg_color="#B8860B",
-            hover_color="#8B6508",
-            command=self.crear_subdivisiones_seleccionadas,
-            state="disabled"
-        )
-        self.btn_subdividir.grid(row=3, column=0, pady=(5, 15), padx=10, sticky="ew")
 
     # ============================================================
     # CARGA INICIAL
@@ -172,7 +183,7 @@ class MapaBodegaTab(ctk.CTkFrame):
     def _cargar_bodegas_inicial_pesado(self):
         try:
             bodegas = self.db.cargar_bodegas()
-            self.after(0, self._actualizar_bodegas_ui, bodegas)
+            ejecutar_en_ui(self, self._actualizar_bodegas_ui, bodegas)
         except Exception as e:
             print(f"Error cargando bodegas iniciales: {e}")
 
@@ -188,10 +199,29 @@ class MapaBodegaTab(ctk.CTkFrame):
         self.combo_bodega.configure(values=nombres)
 
         if nombres:
-            self.combo_bodega.set(nombres[0])
+            self.combo_bodega.set(
+                self.nombre_bodega_predeterminada(self.bodegas)
+            )
             self.cargar_racks_por_bodega()
         else:
             self.label_estado.configure(text="No hay bodegas activas.")
+
+    @staticmethod
+    def nombre_bodega_predeterminada(bodegas):
+        if not bodegas:
+            return ""
+
+        for bodega in bodegas:
+            if str(bodega.get("codigo_bodega") or "").strip().upper() == "B1":
+                return bodega.get("nombre", "")
+
+        for bodega in bodegas:
+            if str(bodega.get("nombre") or "").strip().casefold() != (
+                "afuera de bodega"
+            ):
+                return bodega.get("nombre", "")
+
+        return bodegas[0].get("nombre", "")
 
     def al_cambiar_bodega(self, opcion=None):
         self.cargar_racks_por_bodega()
@@ -212,17 +242,14 @@ class MapaBodegaTab(ctk.CTkFrame):
     def _cargar_racks_pesado(self, bodega_id):
         try:
             racks = self.db.cargar_racks(bodega_id)
-            self.after(0, self._actualizar_racks_ui, racks)
+            ejecutar_en_ui(self, self._actualizar_racks_ui, racks)
         except Exception as e:
-            print(f"Error cargando racks: {e}")
+            print(f"Error cargando sectores: {e}")
 
     def _actualizar_racks_ui(self, racks):
         rack_actual = self.combo_rack.get()
-        self.racks = racks or []
-        self.mapa_racks = {
-            r["codigo_rack"]: r
-            for r in self.racks
-        }
+        self.racks = list(racks or [])
+        self.mapa_racks = self.construir_mapa_etiquetas(self.racks)
 
         codigos = list(self.mapa_racks.keys())
 
@@ -235,7 +262,7 @@ class MapaBodegaTab(ctk.CTkFrame):
             self.cargar_mapa_actual()
         else:
             self.limpiar_rack()
-            self.label_estado.configure(text="No hay racks activos.")
+            self.label_estado.configure(text="No hay sectores activos.")
 
     def al_cambiar_rack(self, opcion=None):
         self.cargar_mapa_actual()
@@ -250,7 +277,10 @@ class MapaBodegaTab(ctk.CTkFrame):
         if not rack:
             return
 
-        self.label_estado.configure(text="Cargando mapa...", text_color="orange")
+        self.label_estado.configure(
+            text="Cargando mapa...",
+            text_color=color_estado("cargando")
+        )
         self._solicitud_mapa += 1
         solicitud_id = self._solicitud_mapa
 
@@ -263,8 +293,8 @@ class MapaBodegaTab(ctk.CTkFrame):
     def _cargar_mapa_pesado(self, rack_id, solicitud_id):
         try:
             datos_mapa = self.db.cargar_mapa_rack_completo(rack_id)
-            self.after(
-                0,
+            ejecutar_en_ui(
+                self,
                 self._dibujar_rack,
                 datos_mapa,
                 rack_id,
@@ -276,6 +306,15 @@ class MapaBodegaTab(ctk.CTkFrame):
     def limpiar_rack(self):
         for widget in self.frame_rack.winfo_children():
             widget.destroy()
+
+    @staticmethod
+    def numero_estante(valor):
+        digitos = "".join(c for c in str(valor or "") if c.isdigit())
+        return int(digitos or 0)
+
+    @staticmethod
+    def calcular_numero_estante(modulo, nivel_local, estantes_por_modulo):
+        return (modulo - 1) * estantes_por_modulo + nivel_local
 
     def _dibujar_rack(self, datos_mapa, rack_id, solicitud_id):
         rack_actual = self.mapa_racks.get(self.combo_rack.get())
@@ -290,116 +329,140 @@ class MapaBodegaTab(ctk.CTkFrame):
 
         self.datos_mapa = datos_mapa or {}
         self.ubicacion_seleccionada = None
-        self.btn_subdividir.configure(state="disabled")
         self.label_detalle.configure(
-            text="Seleccione una ubicación del rack.",
-            text_color="gray"
+            text="Seleccione un estante del sector.",
+            text_color=color_estado("suave")
         )
         self.limpiar_tabla_productos()
 
         ubicaciones = self.datos_mapa.get("ubicaciones_base", [])
         resumenes = self.datos_mapa.get("resumen_por_ubicacion", {})
 
-        matriz = {}
+        ubicaciones_por_numero = {
+            self.numero_estante(u.get("nivel")): u
+            for u in ubicaciones
+            if self.numero_estante(u.get("nivel")) > 0
+        }
 
-        for u in ubicaciones:
-            nivel = u.get("nivel", "")
-            columna = u.get("columna", "")
-            matriz[(nivel, columna)] = u
+        estantes_por_modulo = max(1, int(rack_actual.get("niveles") or 5))
+        cantidad_modulos = max(1, int(rack_actual.get("columnas") or 2))
 
-        cantidad_niveles = max(1, int(rack_actual.get("niveles") or 3))
-        cantidad_columnas = max(1, int(rack_actual.get("columnas") or 3))
-
-        for indice in range(8):
+        for indice in range(max(20, cantidad_modulos)):
             self.frame_rack.grid_columnconfigure(
                 indice,
-                weight=1 if indice < cantidad_columnas else 0
+                weight=1 if indice < cantidad_modulos else 0
             )
+        for indice in range(max(12, estantes_por_modulo + 1)):
             self.frame_rack.grid_rowconfigure(
                 indice,
-                weight=1 if indice < cantidad_niveles else 0
+                weight=1 if 1 <= indice <= estantes_por_modulo else 0
             )
 
-        niveles = [
-            f"N{i:02d}"
-            for i in range(cantidad_niveles, 0, -1)
-        ]
-        columnas = [
-            f"C{i:02d}"
-            for i in range(1, cantidad_columnas + 1)
-        ]
-        alto_boton = max(58, min(120, int(510 / cantidad_niveles)))
+        alto_boton = max(54, min(105, int(470 / estantes_por_modulo)))
+        productos_por_ubicacion = self.datos_mapa.get(
+            "productos_por_ubicacion",
+            {}
+        )
+        subs_por_padre = self.datos_mapa.get(
+            "sububicaciones_por_padre",
+            {}
+        )
 
-        for fila, nivel in enumerate(niveles):
-            for col, columna in enumerate(columnas):
-                ubicacion = matriz.get((nivel, columna))
+        # El módulo 1 es el de más a la derecha. Se dibuja el último módulo
+        # a la izquierda para respetar el recorrido físico derecha → izquierda.
+        for columna_ui, modulo in enumerate(
+            range(cantidad_modulos, 0, -1)
+        ):
+            titulo = f"Módulo {modulo}"
+            if modulo == 1:
+                titulo += " · derecha"
+            ctk.CTkLabel(
+                self.frame_rack,
+                text=titulo,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color=PALETA["primario"]
+            ).grid(row=0, column=columna_ui, padx=7, pady=(8, 3))
+
+            for fila_ui, nivel_local in enumerate(
+                range(estantes_por_modulo, 0, -1),
+                start=1
+            ):
+                numero = self.calcular_numero_estante(
+                    modulo,
+                    nivel_local,
+                    estantes_por_modulo
+                )
+                ubicacion = ubicaciones_por_numero.get(numero)
 
                 if not ubicacion:
                     boton = ctk.CTkButton(
                         self.frame_rack,
-                        text=f"{nivel}-{columna}\nSin crear",
+                        text=f"Estante {numero}\nSin crear",
                         height=alto_boton,
-                        fg_color="#777777",
-                        hover_color="#777777",
+                        fg_color=PALETA["borde"],
+                        hover_color=PALETA["borde"],
+                        text_color=PALETA["texto_suave"],
                         state="disabled"
                     )
-                    boton.grid(row=fila, column=col, padx=10, pady=10, sticky="nsew")
+                    boton.grid(
+                        row=fila_ui,
+                        column=columna_ui,
+                        padx=7,
+                        pady=5,
+                        sticky="nsew"
+                    )
                     continue
 
                 resumen = resumenes.get(
                     ubicacion["id"],
-                    {
-                        "productos_directos": 0,
-                        "productos_sububicaciones": 0,
-                        "productos_total": 0,
-                        "subdivisiones": 0,
-                        "stock_total": 0
-                    }
+                    {"productos_total": 0, "stock_total": 0}
                 )
-
-                texto = (
-                    f"{ubicacion['nivel']}-{ubicacion['columna']}\n"
-                    f"{ubicacion['codigo_ubicacion']}\n"
+                productos_estante = list(
+                    productos_por_ubicacion.get(ubicacion["id"], [])
                 )
-
-                if resumen["subdivisiones"] > 0:
-                    texto += (
-                        f"Subdivisiones: {resumen['subdivisiones']}\n"
-                        f"Prod.: {resumen['productos_total']} | Stock: {resumen['stock_total']}"
+                for sub in subs_por_padre.get(ubicacion["id"], []):
+                    productos_estante.extend(
+                        productos_por_ubicacion.get(sub["id"], [])
                     )
-                    color = "#B8860B"
-                    hover = "#8B6508"
 
-                elif resumen["productos_total"] > 0:
-                    texto += (
-                        f"Productos: {resumen['productos_total']}\n"
-                        f"Stock: {resumen['stock_total']}"
+                if resumen.get("productos_total", 0) > 0:
+                    nombres = " · ".join(
+                        p.get("nombre", "-")
+                        for p in productos_estante[:3]
                     )
-                    color = "#1f538d"
-                    hover = "#163c65"
-
+                    if len(productos_estante) > 3:
+                        nombres += f" · +{len(productos_estante) - 3}"
+                    texto = (
+                        f"Estante {numero}\n{nombres}\n"
+                        f"Stock: {resumen.get('stock_total', 0)}"
+                    )
+                    color = PALETA["primario"]
+                    hover = PALETA["primario_hover"]
                 else:
-                    texto += "Libre"
-                    color = "#2E8B57"
-                    hover = "#246B45"
+                    texto = f"Estante {numero}\nLibre"
+                    color = PALETA["exito"]
+                    hover = PALETA["exito_hover"]
 
                 boton = ctk.CTkButton(
                     self.frame_rack,
                     text=texto,
                     height=alto_boton,
-                    font=ctk.CTkFont(
-                        size=11 if cantidad_columnas > 4 else 12,
-                        weight="bold"
-                    ),
+                    font=ctk.CTkFont(size=11, weight="bold"),
                     fg_color=color,
                     hover_color=hover,
                     command=lambda u=ubicacion: self.seleccionar_ubicacion(u)
                 )
-                boton.grid(row=fila, column=col, padx=10, pady=10, sticky="nsew")
+                boton.grid(
+                    row=fila_ui,
+                    column=columna_ui,
+                    padx=7,
+                    pady=5,
+                    sticky="nsew"
+                )
 
         self.label_estado.configure(
-            text=f"Rack {self.combo_rack.get()} cargado.",
-            text_color="green"
+            text=f"{self.combo_rack.get()} cargado.",
+            text_color=color_estado("ok")
         )
 
     # ============================================================
@@ -410,30 +473,20 @@ class MapaBodegaTab(ctk.CTkFrame):
 
         self.label_detalle.configure(
             text=(
-                f"Ubicación: {ubicacion.get('codigo_ubicacion')}\n"
-                f"Tipo: {ubicacion.get('tipo')}\n"
-                f"Nivel: {ubicacion.get('nivel')} | Columna: {ubicacion.get('columna')}"
+                f"Sector: {self.combo_rack.get()}\n"
+                f"Estante: {self.numero_estante(ubicacion.get('nivel'))}\n"
+                f"Código: {ubicacion.get('codigo_ubicacion')}"
             )
         )
-
-        self.btn_subdividir.configure(state="normal")
 
         sububicaciones_por_padre = self.datos_mapa.get("sububicaciones_por_padre", {})
         productos_por_ubicacion = self.datos_mapa.get("productos_por_ubicacion", {})
 
         sububicaciones = sububicaciones_por_padre.get(ubicacion["id"], [])
-
-        if sububicaciones:
-            productos_directos = productos_por_ubicacion.get(ubicacion["id"], [])
-            self._mostrar_sububicaciones(
-                ubicacion,
-                sububicaciones,
-                productos_por_ubicacion,
-                productos_directos
-            )
-        else:
-            productos = productos_por_ubicacion.get(ubicacion["id"], [])
-            self._mostrar_productos(productos)
+        productos = list(productos_por_ubicacion.get(ubicacion["id"], []))
+        for sub in sububicaciones:
+            productos.extend(productos_por_ubicacion.get(sub["id"], []))
+        self._mostrar_productos(productos)
 
     def limpiar_tabla_productos(self):
         for item in self.tabla_productos.get_children():
@@ -462,152 +515,83 @@ class MapaBodegaTab(ctk.CTkFrame):
                 )
             )
 
-    def _mostrar_sububicaciones(
-        self,
-        ubicacion,
-        sububicaciones,
-        productos_por_ubicacion,
-        productos_directos
-    ):
-        self.limpiar_tabla_productos()
-
-        for p in productos_directos:
-            self.tabla_productos.insert(
-                "",
-                "end",
-                values=(
-                    f"Bloque | {p.get('nombre', '-')}",
-                    p.get("stock", 0),
-                    p.get("categoria", "-"),
-                    p.get("codigo_barras", "-")
-                )
-            )
-
-        for sub in sububicaciones:
-            productos = productos_por_ubicacion.get(sub["id"], [])
-
-            if not productos:
-                self.tabla_productos.insert(
-                    "",
-                    "end",
-                    values=(sub.get("codigo_ubicacion"), "Libre", "Subdivisión", "-")
-                )
-            else:
-                for p in productos:
-                    self.tabla_productos.insert(
-                        "",
-                        "end",
-                        values=(
-                            f"{sub.get('subdivision')} | {p.get('nombre', '-')}",
-                            p.get("stock", 0),
-                            p.get("categoria", "-"),
-                            p.get("codigo_barras", "-")
-                        )
-                    )
-
     # ============================================================
-    # CREAR SUBDIVISIONES
-    # ============================================================
-    def crear_subdivisiones_seleccionadas(self):
-        if not self.ubicacion_seleccionada:
-            return messagebox.showwarning("Aviso", "Seleccione una ubicación.")
-
-        ubicacion = self.ubicacion_seleccionada
-
-        if ubicacion.get("tipo") != "Bloque":
-            return messagebox.showwarning(
-                "Aviso",
-                "Solo se pueden subdividir ubicaciones tipo Bloque."
-            )
-
-        if messagebox.askyesno(
-            "Crear subdivisiones",
-            f"¿Desea crear 4 subdivisiones para {ubicacion.get('codigo_ubicacion')}?"
-        ):
-            exito, msg = self.db.crear_subdivisiones_ubicacion(
-                ubicacion["id"],
-                cantidad=4
-            )
-
-            if exito:
-                messagebox.showinfo("Éxito", msg)
-                self.cargar_mapa_actual()
-            else:
-                messagebox.showerror("Error", msg)
-
-    # ============================================================
-    # ADMINISTRACIÓN DE RACKS
+    # ADMINISTRACIÓN DE SECTORES
     # ============================================================
     def abrir_gestor_racks(self):
         bodega = self.mapa_bodegas.get(self.combo_bodega.get())
         if not bodega:
             return messagebox.showwarning(
                 "Aviso",
-                "Seleccione una bodega antes de administrar racks."
+                "Seleccione una bodega antes de administrar sectores."
             )
 
-        self.ventana_racks = ctk.CTkToplevel(self)
-        self.ventana_racks.title("Administrar racks")
+        self.ventana_racks = VentanaAdaptable(self)
+        self.ventana_racks.title("Administrar sectores")
         self.ventana_racks.geometry("1180x650")
         self.ventana_racks.minsize(980, 560)
         self.ventana_racks.transient(self.winfo_toplevel())
         self.ventana_racks.grab_set()
+        self.ventana_racks.configure(fg_color=PALETA["fondo"])
 
-        encabezado = ctk.CTkFrame(
-            self.ventana_racks,
-            fg_color="transparent"
-        )
+        encabezado = ctk.CTkFrame(self.ventana_racks, **estilos_barra())
         encabezado.pack(fill="x", padx=15, pady=(15, 8))
 
+        fila_titulo = ctk.CTkFrame(encabezado, fg_color="transparent")
+        fila_titulo.pack(fill="x", padx=12, pady=(10, 4))
+
+        fila_acciones = ctk.CTkFrame(encabezado, fg_color="transparent")
+        fila_acciones.pack(fill="x", padx=12, pady=(4, 10))
+
         ctk.CTkLabel(
-            encabezado,
-            text=f"Racks de {bodega.get('nombre', 'Bodega')}",
-            font=ctk.CTkFont(size=20, weight="bold")
+            fila_titulo,
+            text=f"Sectores de {bodega.get('nombre', 'Bodega')}",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=PALETA["primario"]
         ).pack(side="left")
 
         self.label_cantidad_racks = ctk.CTkLabel(
-            encabezado,
+            fila_titulo,
             text="",
-            text_color="gray"
+            text_color=color_estado("suave")
         )
         self.label_cantidad_racks.pack(side="left", padx=15)
 
         ctk.CTkButton(
-            encabezado,
-            text="+ Nuevo rack",
-            fg_color="green",
-            hover_color="darkgreen",
+            fila_acciones,
+            text="+ Nuevo sector",
+            **estilos_boton("primario"),
             command=lambda: self.abrir_formulario_rack()
-        ).pack(side="right", padx=5)
+        ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            encabezado,
-            text="Editar",
+            fila_acciones,
+            text="Editar sector",
+            **estilos_boton("primario"),
             command=self.editar_rack_seleccionado
-        ).pack(side="right", padx=5)
+        ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            encabezado,
-            text="Retirar",
-            fg_color="#8B0000",
-            hover_color="#5C0000",
+            fila_acciones,
+            text="Retirar sector",
+            **estilos_boton("peligro"),
             command=self.retirar_rack_seleccionado
-        ).pack(side="right", padx=5)
+        ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            encabezado,
-            text="Reactivar",
-            fg_color="#B8860B",
-            hover_color="#8B6508",
+            fila_acciones,
+            text="Reactivar sector",
+            **estilos_boton("exito"),
             command=self.reactivar_rack_seleccionado
-        ).pack(side="right", padx=5)
+        ).pack(side="left", padx=5)
 
-        frame_tabla = ctk.CTkFrame(self.ventana_racks)
+        frame_tabla = ctk.CTkFrame(self.ventana_racks, **estilos_panel())
         frame_tabla.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columnas = (
-            "ID", "Código", "Nombre", "Niveles", "Columnas", "Ancho",
-            "Alto", "Profundidad", "Capacidad", "Orden", "Estado"
+            "ID", "Sector", "Nombre", "Módulos", "Estantes/Módulo",
+            "Total Estantes", "Ancho", "Alto", "Profundidad",
+            "Capacidad", "Estado"
         )
         visibles = columnas[1:]
         self.tabla_racks = ttk.Treeview(
@@ -616,11 +600,13 @@ class MapaBodegaTab(ctk.CTkFrame):
             displaycolumns=visibles,
             show="headings"
         )
+        estilizar_treeview(self.tabla_racks)
         anchos = {
-            "Código": 85,
+            "Sector": 75,
             "Nombre": 150,
-            "Niveles": 70,
-            "Columnas": 75,
+            "Módulos": 75,
+            "Estantes/Módulo": 120,
+            "Total Estantes": 105,
             "Ancho": 80,
             "Alto": 80,
             "Profundidad": 95,
@@ -684,20 +670,21 @@ class MapaBodegaTab(ctk.CTkFrame):
                     rack.get("id"),
                     rack.get("codigo_rack", ""),
                     rack.get("nombre", ""),
-                    rack.get("niveles", 0),
                     rack.get("columnas", 0),
+                    rack.get("niveles", 0),
+                    int(rack.get("columnas") or 0)
+                    * int(rack.get("niveles") or 0),
                     self.formatear_medida(rack.get("ancho_cm")),
                     self.formatear_medida(rack.get("alto_cm")),
                     self.formatear_medida(rack.get("profundidad_cm")),
                     self.formatear_medida(rack.get("capacidad_kg"), " kg"),
-                    rack.get("posicion_orden", "") or "",
                     rack.get("estado", "")
                 )
             )
 
         self.racks_gestor = {rack.get("id"): rack for rack in racks}
         self.label_cantidad_racks.configure(
-            text=f"{activos} activos / {len(racks)} registrados"
+            text=f"{activos} activos / {len(racks)} sectores"
         )
 
     def formatear_medida(self, valor, sufijo=" cm"):
@@ -712,7 +699,7 @@ class MapaBodegaTab(ctk.CTkFrame):
         if not seleccion:
             messagebox.showwarning(
                 "Aviso",
-                "Seleccione un rack.",
+                "Seleccione un sector.",
                 parent=self.ventana_racks
             )
             return None
@@ -731,12 +718,12 @@ class MapaBodegaTab(ctk.CTkFrame):
         if rack.get("estado") == "Inactivo":
             return messagebox.showinfo(
                 "Aviso",
-                "El rack ya está retirado.",
+                "El sector ya está retirado.",
                 parent=self.ventana_racks
             )
         if not messagebox.askyesno(
-            "Retirar rack",
-            f"¿Desea retirar {rack.get('codigo_rack')}?\n\n"
+            "Retirar sector",
+            f"¿Desea retirar el sector {rack.get('codigo_rack')}?\n\n"
             "La operación se bloqueará si existen productos asignados.",
             parent=self.ventana_racks
         ):
@@ -746,7 +733,16 @@ class MapaBodegaTab(ctk.CTkFrame):
         if exito:
             self.refrescar_despues_cambio_rack()
         else:
-            messagebox.showerror("Error", mensaje, parent=self.ventana_racks)
+            titulo = "Error"
+            detalle = mensaje
+            if "productos asignados" in mensaje:
+                titulo = "Sector con productos asignados"
+                detalle = (
+                    f"{mensaje}\n\n"
+                    "Antes de retirarlo, mueva esos productos a otro sector "
+                    "desde Inventario."
+                )
+            messagebox.showerror(titulo, detalle, parent=self.ventana_racks)
 
     def reactivar_rack_seleccionado(self):
         rack = self.obtener_rack_gestor_seleccionado()
@@ -755,7 +751,7 @@ class MapaBodegaTab(ctk.CTkFrame):
         if rack.get("estado") == "Activo":
             return messagebox.showinfo(
                 "Aviso",
-                "El rack ya está activo.",
+                "El sector ya está activo.",
                 parent=self.ventana_racks
             )
 
@@ -765,35 +761,85 @@ class MapaBodegaTab(ctk.CTkFrame):
         else:
             messagebox.showerror("Error", mensaje, parent=self.ventana_racks)
 
+    @staticmethod
+    def codigo_rack_desde_numero(numero):
+        if numero < 1:
+            return ""
+        return f"S{numero:02d}"
+
+    @staticmethod
+    def etiqueta_sector(rack):
+        nombre = str(rack.get("nombre") or "").strip()
+        codigo = str(rack.get("codigo_rack") or "").strip()
+        return nombre or codigo or "Sector sin nombre"
+
+    @classmethod
+    def construir_mapa_etiquetas(cls, racks):
+        mapa = {}
+        for rack in racks:
+            etiqueta_base = cls.etiqueta_sector(rack)
+            etiqueta = etiqueta_base
+            if etiqueta in mapa:
+                codigo = str(rack.get("codigo_rack") or "").strip()
+                etiqueta = f"{etiqueta_base} ({codigo})"
+            mapa[etiqueta] = rack
+        return mapa
+
+    @staticmethod
+    def validar_codigo_sector(codigo):
+        codigo = str(codigo or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9_-]{1,20}", codigo):
+            raise ValueError(
+                "El código del sector debe tener entre 1 y 20 caracteres "
+                "y usar solo letras, números, guion o guion bajo."
+            )
+        return codigo
+
+    def siguiente_codigo_rack(self):
+        racks = list(getattr(self, "racks_gestor", {}).values())
+        if not racks:
+            racks = self.racks
+        usados = {
+            str(r.get("codigo_rack") or "").strip().upper()
+            for r in racks
+        }
+        for numero in range(1, 100):
+            codigo = self.codigo_rack_desde_numero(numero)
+            if codigo not in usados:
+                return codigo
+        return "S99"
+
     def abrir_formulario_rack(self, rack=None):
         editando = rack is not None
-        ventana = ctk.CTkToplevel(self.ventana_racks)
-        ventana.title("Editar rack" if editando else "Nuevo rack")
+        ventana = VentanaAdaptable(self.ventana_racks)
+        ventana.title("Editar sector" if editando else "Nuevo sector")
         ventana.geometry("620x680")
         ventana.minsize(620, 680)
         ventana.transient(self.ventana_racks)
         ventana.grab_set()
+        ventana.configure(fg_color=PALETA["fondo"])
 
-        scroll = ctk.CTkScrollableFrame(ventana)
+        scroll = ctk.CTkScrollableFrame(ventana, **estilos_panel())
         scroll.pack(fill="both", expand=True, padx=12, pady=12)
         scroll.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkLabel(
             scroll,
-            text="Configuración del rack",
-            font=ctk.CTkFont(size=20, weight="bold")
+            text="Configuración del sector",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=PALETA["primario"]
         ).grid(row=0, column=0, columnspan=2, pady=(8, 18))
 
+        codigo_sugerido = self.siguiente_codigo_rack()
         campos = [
-            ("Código", "codigo_rack", "Ej: R07"),
-            ("Nombre", "nombre", "Nombre descriptivo"),
-            ("Niveles", "niveles", "1 a 8"),
-            ("Columnas", "columnas", "1 a 8"),
+            ("Código interno", "codigo_rack", "Ej: APORTES"),
+            ("Nombre", "nombre", "Ej: Aportes"),
+            ("Módulos físicos", "columnas", "Ej: 2"),
+            ("Estantes por módulo", "niveles", "Ej: 5"),
             ("Ancho (cm)", "ancho_cm", "Ej: 200"),
             ("Alto (cm)", "alto_cm", "Ej: 220"),
             ("Profundidad (cm)", "profundidad_cm", "Ej: 60"),
-            ("Capacidad (kg)", "capacidad_kg", "Ej: 1500"),
-            ("Orden físico", "posicion_orden", "Ej: 7")
+            ("Capacidad (kg)", "capacidad_kg", "Ej: 1500")
         ]
         entradas = {}
 
@@ -820,8 +866,18 @@ class MapaBodegaTab(ctk.CTkFrame):
                 pady=(3, 10)
             )
             valor = rack.get(clave) if rack else ""
+            if not rack and clave == "codigo_rack":
+                valor = codigo_sugerido
+            elif not rack and clave == "nombre":
+                valor = f"Sector {codigo_sugerido}"
+            elif not rack and clave == "columnas":
+                valor = 2
+            elif not rack and clave == "niveles":
+                valor = 5
             if valor is not None and valor != "":
                 entrada.insert(0, str(valor))
+            if editando and clave == "codigo_rack":
+                entrada.configure(state="disabled")
             entradas[clave] = entrada
 
         fila_descripcion = 1 + ((len(campos) + 1) // 2) * 2
@@ -850,17 +906,21 @@ class MapaBodegaTab(ctk.CTkFrame):
 
         def guardar():
             try:
-                codigo = entradas["codigo_rack"].get().strip().upper()
+                codigo = self.validar_codigo_sector(
+                    entradas["codigo_rack"].get()
+                )
                 nombre = entradas["nombre"].get().strip()
                 niveles = int(entradas["niveles"].get().strip())
-                columnas = int(entradas["columnas"].get().strip())
+                modulos = int(entradas["columnas"].get().strip())
 
                 if not codigo or not nombre:
                     raise ValueError("Código y nombre son obligatorios.")
-                if not 1 <= niveles <= 8 or not 1 <= columnas <= 8:
+                if not 1 <= niveles <= 10:
                     raise ValueError(
-                        "Niveles y columnas deben estar entre 1 y 8."
+                        "Los estantes por módulo deben estar entre 1 y 10."
                     )
+                if not 1 <= modulos <= 20:
+                    raise ValueError("Los módulos deben estar entre 1 y 20.")
 
                 datos = {
                     "codigo_rack": codigo,
@@ -870,7 +930,7 @@ class MapaBodegaTab(ctk.CTkFrame):
                         "end"
                     ).strip(),
                     "niveles": niveles,
-                    "columnas": columnas,
+                    "columnas": modulos,
                     "ancho_cm": self.leer_decimal_opcional(
                         entradas["ancho_cm"].get(),
                         "ancho"
@@ -887,9 +947,10 @@ class MapaBodegaTab(ctk.CTkFrame):
                         entradas["capacidad_kg"].get(),
                         "capacidad"
                     ),
-                    "posicion_orden": self.leer_entero_opcional(
-                        entradas["posicion_orden"].get(),
-                        "orden"
+                    "posicion_orden": (
+                        rack.get("posicion_orden")
+                        if editando else
+                        len(getattr(self, "racks_gestor", {})) + 1
                     )
                 }
 
@@ -925,10 +986,9 @@ class MapaBodegaTab(ctk.CTkFrame):
 
         ctk.CTkButton(
             scroll,
-            text="Guardar cambios" if editando else "Crear rack",
+            text="Guardar cambios" if editando else "Crear sector",
             height=42,
-            fg_color="green",
-            hover_color="darkgreen",
+            **estilos_boton("primario"),
             command=guardar
         ).grid(
             row=fila_descripcion + 2,
@@ -961,5 +1021,12 @@ class MapaBodegaTab(ctk.CTkFrame):
         self.cargar_racks_gestor()
         self.cargar_racks_por_bodega()
         app = self.winfo_toplevel()
-        if hasattr(app, "vista_inventario"):
-            app.vista_inventario.iniciar_carga_hilo()
+        for nombre_vista in (
+            "vista_inventario",
+            "vista_cafeteria",
+            "vista_aseo",
+            "vista_libreria"
+        ):
+            vista = getattr(app, nombre_vista, None)
+            if vista is not None:
+                vista.iniciar_carga_hilo()

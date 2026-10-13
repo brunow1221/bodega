@@ -1,16 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets\\icono.ico', 'assets'), ('database\\migrations', 'database\\migrations'), ('MIGRACION_SEGURIDAD.md', '.')]
-datas += collect_data_files('barcode')
+datas = [('assets/icono.ico', 'assets'), ('database/migrations', 'database/migrations'), ('MIGRACION_SEGURIDAD.md', '.')]
+binaries = []
+hiddenimports = []
+tmp_ret = collect_all('tzdata')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -37,7 +40,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='version_info.txt',
-    icon=['assets\\icono.ico'],
+    icon=['assets/icono.ico'],
 )
 coll = COLLECT(
     exe,

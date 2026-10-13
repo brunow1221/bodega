@@ -1,15 +1,51 @@
 import customtkinter as ctk
+from utils.ui_windows import VentanaAdaptable
 from tkinter import messagebox, ttk
 from datetime import datetime
 from uuid import uuid4
+import threading
+from utils.searchable_combobox import SearchableCombobox
+from utils.ui_dispatcher import ejecutar_en_ui, iniciar_despachador_ui
+from utils.movimientos import (
+    TIPO_ENTREGA_HERRAMIENTA_PERSONAL,
+    validar_entrega_herramienta_personal,
+)
+from views.tab_inventario import InventarioTab
+from utils.ui_theme import (
+    PALETA,
+    estilos_boton,
+    estilos_panel,
+    estilizar_treeview,
+)
 
 
-class SalidasTab(ctk.CTkFrame):
-    def __init__(self, master, db_manager, barcode_gen):
-        super().__init__(master, fg_color="transparent")
+class SalidasTab(ctk.CTkScrollableFrame):
+    def __init__(
+        self,
+        master,
+        db_manager,
+        on_epp_registrado=None,
+        on_herramienta_personal_registrada=None,
+    ):
+        super().__init__(
+            master,
+            fg_color="transparent",
+            orientation="vertical",
+            scrollbar_button_color=PALETA["primario"],
+            scrollbar_button_hover_color=PALETA["primario_hover"]
+        )
 
         self.db = db_manager
-        self.barcode = barcode_gen
+        iniciar_despachador_ui(self)
+        self.on_epp_registrado = on_epp_registrado
+        self.on_herramienta_personal_registrada = (
+            on_herramienta_personal_registrada
+        )
+        self._carga_selectores_id = 0
+        self._carga_proyectos_id = 0
+        self._carga_ultimos_id = 0
+        self.productos_selector = []
+        self.trabajadores_selector = []
 
         self.crear_interfaz()
 
@@ -20,7 +56,7 @@ class SalidasTab(ctk.CTkFrame):
         # =========================
         # CONTENEDOR PRINCIPAL
         # =========================
-        self.frame_contenedor = ctk.CTkFrame(self, corner_radius=15)
+        self.frame_contenedor = ctk.CTkFrame(self, **estilos_panel())
         self.frame_contenedor.grid(row=0, column=0, padx=30, pady=30, sticky="nsew")
 
         self.frame_contenedor.grid_columnconfigure(0, weight=1)
@@ -28,14 +64,18 @@ class SalidasTab(ctk.CTkFrame):
         ctk.CTkLabel(
             self.frame_contenedor,
             text="Registro de Movimientos por Proyecto",
-            font=ctk.CTkFont(size=26, weight="bold")
+            font=ctk.CTkFont(size=26, weight="bold"),
+            text_color=PALETA["primario"]
         ).grid(row=0, column=0, pady=(25, 8))
 
         ctk.CTkLabel(
             self.frame_contenedor,
-            text="Seleccione el proyecto, escanee el producto y registre la cantidad. El responsable es opcional.",
+            text=(
+                "Busque y seleccione el producto y, opcionalmente, "
+                "el trabajador responsable."
+            ),
             font=ctk.CTkFont(size=14),
-            text_color="gray"
+            text_color=PALETA["texto_suave"]
         ).grid(row=1, column=0, pady=(0, 18))
 
         # =========================
@@ -45,6 +85,7 @@ class SalidasTab(ctk.CTkFrame):
             "Entrega / Consumo",
             "Baja por Daño / Merma",
             "Préstamo de Herramienta",
+            TIPO_ENTREGA_HERRAMIENTA_PERSONAL,
             "Devolución de Herramienta",
             "Envío a Calibración / Reparación",
             "Retorno de Reparación",
@@ -74,73 +115,94 @@ class SalidasTab(ctk.CTkFrame):
         # =========================
         ctk.CTkLabel(
             self.frame_contenedor,
-            text="Proyecto / Destino:",
+            text="Proyecto / Destino (escriba para buscar):",
             font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=4, column=0, pady=(5, 5))
 
-        opciones_proyectos = self.db.cargar_proyectos()
+        opciones_proyectos = []
 
-        self.combo_proyecto = ctk.CTkComboBox(
+        self.combo_proyecto = SearchableCombobox(
             self.frame_contenedor,
-            values=opciones_proyectos,
-            width=340,
-            height=40,
-            state="readonly"
+            label_getter=str,
+            width=52,
+            font=("Segoe UI", 12),
         )
-        self.combo_proyecto.grid(row=5, column=0, pady=(0, 12))
+        self.combo_proyecto.grid(row=5, column=0, pady=(0, 12), ipady=6)
+        self.combo_proyecto.set_items(opciones_proyectos)
 
-        if opciones_proyectos:
-            self.combo_proyecto.set(opciones_proyectos[0])
+        self.combo_proyecto.set("")
 
         # =========================
-        # CÓDIGO PRODUCTO
+        # PRODUCTO BUSCABLE
         # =========================
         ctk.CTkLabel(
             self.frame_contenedor,
-            text="Código del Producto:",
+            text="Producto (escriba para buscar o abra la lista):",
             font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=6, column=0, pady=(5, 5))
 
-        self.entrada_producto_salida = ctk.CTkEntry(
+        self.combo_producto = SearchableCombobox(
             self.frame_contenedor,
-            placeholder_text="Escanee el código de barras del producto",
-            width=340,
-            height=45,
-            font=ctk.CTkFont(size=15)
+            label_getter=self.etiqueta_producto,
+            search_getter=self.texto_busqueda_producto,
+            on_selected=self.al_seleccionar_producto,
+            width=52,
+            font=("Segoe UI", 12)
         )
-        self.entrada_producto_salida.grid(row=7, column=0, pady=(0, 12))
-        self.entrada_producto_salida.bind("<Return>", self.procesar_producto_pistola)
+        self.combo_producto.grid(row=7, column=0, pady=(0, 12), ipady=6)
 
         # =========================
         # RESPONSABLE OPCIONAL
         # =========================
         ctk.CTkLabel(
             self.frame_contenedor,
-            text="Responsable / Trabajador (opcional):",
+            text=(
+                "Responsable / Trabajador "
+                "(escriba para buscar o abra la lista):"
+            ),
             font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=8, column=0, pady=(5, 5))
 
-        self.entrada_trabajador = ctk.CTkEntry(
+        self.combo_trabajador = SearchableCombobox(
             self.frame_contenedor,
-            placeholder_text="Escanee QR/RUT si desea asociar responsable",
-            width=340,
-            height=45,
-            font=ctk.CTkFont(size=15)
+            label_getter=self.etiqueta_trabajador,
+            search_getter=self.texto_busqueda_trabajador,
+            on_selected=self.al_seleccionar_trabajador,
+            width=52,
+            font=("Segoe UI", 12)
         )
-        self.entrada_trabajador.grid(row=9, column=0, pady=(0, 8))
-        self.entrada_trabajador.configure(state="disabled")
-        self.entrada_trabajador.bind("<Return>", self.procesar_trabajador_pistola)
+        self.combo_trabajador.grid(row=9, column=0, pady=(0, 8), ipady=6)
 
         self.btn_sin_responsable = ctk.CTkButton(
             self.frame_contenedor,
             text="Continuar sin responsable",
             height=34,
             width=340,
-            fg_color="#555555",
-            hover_color="#333333",
+            **estilos_boton("secundario"),
             command=self.continuar_sin_responsable
         )
         self.btn_sin_responsable.grid(row=10, column=0, pady=(0, 8))
+
+        # =========================
+        # COMENTARIO OPCIONAL
+        # =========================
+        ctk.CTkLabel(
+            self.frame_contenedor,
+            text="Comentario / Observación (opcional):",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).grid(row=11, column=0, pady=(8, 5))
+
+        self.texto_comentario = ctk.CTkTextbox(
+            self.frame_contenedor,
+            width=520,
+            height=72,
+            wrap="word",
+            fg_color=PALETA["panel_alt"],
+            border_color=PALETA["borde"],
+            border_width=1,
+            text_color=PALETA["texto"]
+        )
+        self.texto_comentario.grid(row=12, column=0, pady=(0, 8))
 
         # =========================
         # MENSAJE DE ESTADO
@@ -151,7 +213,7 @@ class SalidasTab(ctk.CTkFrame):
             font=ctk.CTkFont(size=14, weight="bold"),
             wraplength=520
         )
-        self.label_estado.grid(row=11, column=0, pady=(5, 12))
+        self.label_estado.grid(row=13, column=0, pady=(5, 12))
 
         # =========================
         # BOTONES
@@ -161,23 +223,21 @@ class SalidasTab(ctk.CTkFrame):
             text="Registrar Movimiento",
             height=48,
             width=340,
-            fg_color="#1f538d",
-            hover_color="#163c65",
+            **estilos_boton("primario"),
             font=ctk.CTkFont(size=15, weight="bold"),
             command=self.registrar_salida
         )
-        self.btn_registrar.grid(row=12, column=0, pady=(8, 8))
+        self.btn_registrar.grid(row=14, column=0, pady=(8, 8))
 
         self.btn_limpiar = ctk.CTkButton(
             self.frame_contenedor,
-            text="Limpiar Escaneo",
+            text="Limpiar formulario",
             height=36,
             width=340,
-            fg_color="#555555",
-            hover_color="#333333",
-            command=self.limpiar_escaneo
+            **estilos_boton("secundario"),
+            command=self.limpiar_formulario
         )
-        self.btn_limpiar.grid(row=13, column=0, pady=(0, 15))
+        self.btn_limpiar.grid(row=15, column=0, pady=(0, 15))
 
         # =========================
         # ÚLTIMOS MOVIMIENTOS
@@ -186,10 +246,10 @@ class SalidasTab(ctk.CTkFrame):
             self.frame_contenedor,
             text="Últimos 5 movimientos registrados",
             font=ctk.CTkFont(size=16, weight="bold")
-        ).grid(row=14, column=0, pady=(5, 5))
+        ).grid(row=16, column=0, pady=(5, 5))
 
-        frame_ultimos = ctk.CTkFrame(self.frame_contenedor)
-        frame_ultimos.grid(row=15, column=0, padx=20, pady=(0, 25), sticky="ew")
+        frame_ultimos = ctk.CTkFrame(self.frame_contenedor, **estilos_panel())
+        frame_ultimos.grid(row=17, column=0, padx=20, pady=(0, 25), sticky="ew")
 
         columnas = ("Fecha", "Producto", "Responsable", "Movimiento / Proyecto", "Cant.")
 
@@ -199,6 +259,7 @@ class SalidasTab(ctk.CTkFrame):
             show="headings",
             height=5
         )
+        estilizar_treeview(self.tabla_ultimos)
 
         anchos = {
             "Fecha": 120,
@@ -214,173 +275,220 @@ class SalidasTab(ctk.CTkFrame):
 
         self.tabla_ultimos.pack(fill="x", expand=True, padx=8, pady=8)
 
-        self.cargar_ultimos_movimientos()
-
-        self.after(300, self.entrada_producto_salida.focus_set)
+        self.after(100, self.cargar_proyectos)
+        self.after(150, self.cargar_ultimos_movimientos)
+        self.after(200, self.iniciar_carga_selectores)
+        self.after(300, self.combo_producto.focus_set)
 
     # ============================================================
     # PROYECTOS
     # ============================================================
     def cargar_proyectos(self):
+        self._carga_proyectos_id += 1
+        threading.Thread(
+            target=self._cargar_proyectos_pesado,
+            args=(self._carga_proyectos_id,),
+            daemon=True,
+        ).start()
+        return True
+
+    def _cargar_proyectos_pesado(self, carga_id):
         try:
             proyectos = self.db.cargar_proyectos()
-
-            if not proyectos:
-                proyectos = ["Taller Interno"]
-
-            proyecto_actual = self.combo_proyecto.get()
-
-            self.combo_proyecto.configure(values=proyectos)
-
-            if proyecto_actual in proyectos:
-                self.combo_proyecto.set(proyecto_actual)
-            else:
-                self.combo_proyecto.set(proyectos[0])
-
-            return True
-
+            ejecutar_en_ui(self, self._actualizar_proyectos_ui, proyectos, carga_id)
         except Exception as e:
             print(f"Error actualizando combo de proyectos: {e}")
-            return False
+            ejecutar_en_ui(self, self._actualizar_proyectos_ui, None, carga_id)
+
+    def _actualizar_proyectos_ui(self, proyectos, carga_id):
+        if carga_id != self._carga_proyectos_id:
+            return
+        if proyectos is None:
+            self.label_estado.configure(text="No se pudieron cargar los proyectos. Revise la conexión.", text_color=PALETA["alerta"])
+            return
+        self.combo_proyecto.set_items(proyectos)
 
     def actualizar_proyectos(self):
         return self.cargar_proyectos()
 
     # ============================================================
-    # FOCO PARA PISTOLA LECTORA
+    # SELECTORES BUSCABLES
     # ============================================================
-    def mantener_foco_pistola(self):
+    @staticmethod
+    def etiqueta_producto(producto):
+        nombre = producto.get("nombre") or "Producto sin nombre"
+        categoria = producto.get("categoria") or "Sin categoría"
+        stock = int(producto.get("stock") or 0)
+        return f"{nombre} · {categoria} · Stock {stock}"
+
+    @staticmethod
+    def texto_busqueda_producto(producto):
+        return " ".join(str(producto.get(campo) or "") for campo in (
+            "nombre", "categoria"
+        ))
+
+    @staticmethod
+    def etiqueta_trabajador(trabajador):
+        nombre = trabajador.get("nombre") or "Trabajador sin nombre"
+        rut = trabajador.get("rut") or "Sin RUT"
+        cargo = trabajador.get("cargo") or "Sin cargo"
+        return f"{nombre} · {rut} · {cargo}"
+
+    @staticmethod
+    def texto_busqueda_trabajador(trabajador):
+        return " ".join(str(trabajador.get(campo) or "") for campo in (
+            "nombre", "rut", "cargo"
+        ))
+
+    def iniciar_carga_selectores(self):
+        self._carga_selectores_id += 1
+        carga_id = self._carga_selectores_id
+        self.label_estado.configure(
+            text="Actualizando productos y trabajadores...",
+            text_color=PALETA["texto_suave"]
+        )
+        threading.Thread(
+            target=self._cargar_selectores_pesado,
+            args=(carga_id,),
+            daemon=True
+        ).start()
+
+    def _cargar_selectores_pesado(self, carga_id):
         try:
-            producto = self.entrada_producto_salida.get().strip()
+            productos = self.db.cargar_productos_activos_selector()
+            trabajadores = self.db.cargar_trabajadores_nube()
+        except Exception as error:
+            print(f"Error cargando selectores: {error}")
+            ejecutar_en_ui(self, self._error_selectores_ui, carga_id)
+            return
+        ejecutar_en_ui(
+            self,
+            self._actualizar_selectores_ui,
+            productos,
+            trabajadores,
+            carga_id
+        )
 
-            if not producto:
-                self.entrada_producto_salida.focus_set()
+    def _error_selectores_ui(self, carga_id):
+        if carga_id == self._carga_selectores_id:
+            self.label_estado.configure(text="No se pudieron cargar los datos. Revise la conexión.", text_color=PALETA["alerta"])
 
-        except Exception:
-            pass
+    def _actualizar_selectores_ui(
+        self,
+        productos,
+        trabajadores,
+        carga_id
+    ):
+        if carga_id != self._carga_selectores_id:
+            return
+        self.productos_selector = list(productos or [])
+        self.trabajadores_selector = list(trabajadores or [])
+        self.combo_producto.set_items(self.productos_selector)
+        self.combo_trabajador.set_items(self.trabajadores_selector)
+        self.label_estado.configure(
+            text=(
+                f"{len(self.productos_selector)} productos y "
+                f"{len(self.trabajadores_selector)} trabajadores disponibles."
+            ),
+            text_color=PALETA["texto_suave"]
+        )
+
+    def al_seleccionar_producto(self, producto):
+        self.label_estado.configure(
+            text=(
+                f"Producto seleccionado: {producto.get('nombre', '-')} · "
+                f"Stock: {int(producto.get('stock') or 0)}"
+            ),
+            text_color=PALETA["primario"]
+        )
+        self.combo_trabajador.focus_set()
+
+    def al_seleccionar_trabajador(self, trabajador):
+        self.label_estado.configure(
+            text=f"Responsable seleccionado: {trabajador.get('nombre', '-')}",
+            text_color=PALETA["exito"]
+        )
 
     # ============================================================
     # ÚLTIMOS MOVIMIENTOS
     # ============================================================
     def cargar_ultimos_movimientos(self):
+        self._carga_ultimos_id += 1
+        threading.Thread(
+            target=self._cargar_ultimos_pesado,
+            args=(self._carga_ultimos_id,),
+            daemon=True,
+        ).start()
+
+    def _cargar_ultimos_pesado(self, carga_id):
         try:
-            for item in self.tabla_ultimos.get_children():
-                self.tabla_ultimos.delete(item)
-
             movimientos = self.db.obtener_ultimos_movimientos(5)
-
-            for mov in movimientos:
-                self.tabla_ultimos.insert("", "end", values=mov)
-
+            ejecutar_en_ui(self, self._actualizar_ultimos_ui, movimientos, carga_id)
         except Exception as e:
             print(f"Error cargando últimos movimientos: {e}")
+            ejecutar_en_ui(self, self._actualizar_ultimos_ui, None, carga_id)
 
-    # ============================================================
-    # PROCESAR PRODUCTO
-    # ============================================================
-    def procesar_producto_pistola(self, event=None):
-        codigo = self.entrada_producto_salida.get().strip()
-
-        if not codigo:
+    def _actualizar_ultimos_ui(self, movimientos, carga_id):
+        if carga_id != self._carga_ultimos_id:
             return
-
-        producto = self.db.buscar_producto_por_codigo(codigo)
-
-        if producto:
-            self.entrada_trabajador.configure(state="normal")
-            self.entrada_trabajador.delete(0, "end")
-
-            proyecto = self.combo_proyecto.get()
-
-            self.label_estado.configure(
-                text=(
-                    f"✅ Producto: {producto['nombre']}\n"
-                    f"Proyecto seleccionado: {proyecto}\n"
-                    "Puede escanear un responsable o registrar sin responsable."
-                ),
-                text_color="#1f538d"
-            )
-
-            self.entrada_trabajador.focus_set()
-
-        else:
-            self.label_estado.configure(
-                text="❌ Producto no encontrado o inactivo.",
-                text_color="red"
-            )
-            self.entrada_producto_salida.delete(0, "end")
-            self.entrada_producto_salida.focus_set()
-
-    # ============================================================
-    # PROCESAR RESPONSABLE
-    # ============================================================
-    def procesar_trabajador_pistola(self, event=None):
-        rut = self.entrada_trabajador.get().strip()
-
-        if not rut:
-            self.continuar_sin_responsable()
+        if movimientos is None:
+            self.label_estado.configure(text="No se pudo cargar el historial reciente. Revise la conexión.", text_color=PALETA["alerta"])
             return
-
-        trabajador = self.db.buscar_trabajador_por_rut(rut)
-
-        if trabajador:
-            self.label_estado.configure(
-                text=f"✅ Responsable: {trabajador['nombre']}\nListo para registrar movimiento.",
-                text_color="green"
-            )
-
-        else:
-            self.label_estado.configure(
-                text="❌ QR/RUT no reconocido. Puede corregirlo o continuar sin responsable.",
-                text_color="red"
-            )
-            self.entrada_trabajador.delete(0, "end")
-            self.entrada_trabajador.focus_set()
+        for item in self.tabla_ultimos.get_children():
+            self.tabla_ultimos.delete(item)
+        for mov in movimientos:
+            self.tabla_ultimos.insert("", "end", values=mov)
 
     def continuar_sin_responsable(self):
-        self.entrada_trabajador.configure(state="normal")
-        self.entrada_trabajador.delete(0, "end")
+        self.combo_trabajador.clear()
+        producto = self.combo_producto.get_selected()
+        proyecto = self.combo_proyecto.get_selected()
 
-        producto = self.entrada_producto_salida.get().strip()
-        proyecto = self.combo_proyecto.get()
-
-        if producto:
+        if producto and proyecto:
             self.label_estado.configure(
                 text=(
-                    f"✅ Movimiento sin responsable asociado.\n"
+                    "Movimiento sin responsable asociado.\n"
                     f"Proyecto seleccionado: {proyecto}\n"
                     "Listo para registrar."
                 ),
-                text_color="green"
+                text_color=PALETA["exito"]
             )
         else:
             self.label_estado.configure(
-                text="Escanee primero un producto.",
-                text_color="orange"
+                text="Seleccione un producto y un proyecto desde sus listas.",
+                text_color=PALETA["alerta"]
             )
-            self.entrada_producto_salida.focus_set()
+            self.combo_producto.focus_set()
 
     # ============================================================
     # REGISTRAR MOVIMIENTO
     # ============================================================
     def registrar_salida(self):
-        codigo_producto = self.entrada_producto_salida.get().strip()
-        rut_trabajador = self.entrada_trabajador.get().strip()
+        producto_seleccionado = self.combo_producto.get_selected()
+        trabajador_seleccionado = self.combo_trabajador.get_selected()
         tipo_movimiento = self.combo_movimiento.get()
-        proyecto = self.combo_proyecto.get()
+        proyecto = self.combo_proyecto.get_selected()
+        comentario = self.texto_comentario.get("1.0", "end").strip()
+
+        if len(comentario) > 1000:
+            return messagebox.showwarning(
+                "Comentario demasiado largo",
+                "El comentario puede tener como máximo 1.000 caracteres."
+            )
 
         if not proyecto:
             return messagebox.showwarning(
                 "Aviso",
-                "Debe seleccionar un proyecto antes de registrar el movimiento."
+                "Busque un proyecto y selecciónelo desde la lista antes de registrar el movimiento."
             )
 
-        if not codigo_producto:
+        if not producto_seleccionado:
             return messagebox.showwarning(
                 "Aviso",
-                "Debe escanear o ingresar el código del producto."
+                "Busque un producto y selecciónelo desde la lista."
             )
 
+        codigo_producto = producto_seleccionado.get("codigo_barras")
         producto = self.db.buscar_producto_por_codigo(codigo_producto)
 
         if not producto:
@@ -389,15 +497,42 @@ class SalidasTab(ctk.CTkFrame):
                 "El producto no existe en la base de datos o está inactivo."
             )
 
-        if rut_trabajador:
-            trabajador = self.db.buscar_trabajador_por_rut(rut_trabajador)
+        if self.combo_trabajador.get().strip() and not trabajador_seleccionado:
+            return messagebox.showwarning(
+                "Aviso",
+                "Seleccione al trabajador desde la lista o use "
+                "'Continuar sin responsable'."
+            )
 
-            if not trabajador:
-                return messagebox.showerror(
-                    "Error",
-                    "El responsable ingresado no existe o está inactivo. "
-                    "Corrija el RUT o deje el campo vacío para continuar sin responsable."
-                )
+        es_entrega_epp = (
+            tipo_movimiento == "Entrega / Consumo"
+            and str(producto.get("categoria") or "").strip().casefold() == "epp"
+        )
+        if es_entrega_epp and not trabajador_seleccionado:
+            return messagebox.showwarning(
+                "Responsable requerido",
+                "Para entregar un EPP debe seleccionar al trabajador que lo recibe."
+            )
+
+        es_entrega_herramienta_personal = (
+            tipo_movimiento == TIPO_ENTREGA_HERRAMIENTA_PERSONAL
+        )
+        error_entrega_personal = validar_entrega_herramienta_personal(
+            tipo_movimiento,
+            producto,
+            trabajador_seleccionado,
+        )
+        if error_entrega_personal:
+            return messagebox.showwarning(
+                "Entrega personal inválida",
+                error_entrega_personal,
+            )
+
+        rut_trabajador = (
+            trabajador_seleccionado.get("rut", "")
+            if trabajador_seleccionado
+            else ""
+        )
 
         cantidad = 1
 
@@ -434,10 +569,19 @@ class SalidasTab(ctk.CTkFrame):
             producto["id"],
             stock_actual,
             cantidad,
-            proyecto
+            proyecto,
+            comentario
         )
 
         if exito:
+            if es_entrega_epp and callable(self.on_epp_registrado):
+                self.on_epp_registrado()
+            if (
+                es_entrega_herramienta_personal
+                and callable(self.on_herramienta_personal_registrada)
+            ):
+                self.on_herramienta_personal_registrada()
+
             if tipo_movimiento == "Corte / Transformación":
                 crear_retazo = messagebox.askyesno(
                     "Generar Retazo",
@@ -468,10 +612,15 @@ class SalidasTab(ctk.CTkFrame):
                 )
 
                 self.cargar_ultimos_movimientos()
-                self.limpiar_escaneo()
+                self.limpiar_formulario()
+                self.iniciar_carga_selectores()
                 return
 
-            responsable_txt = rut_trabajador if rut_trabajador else "Sin responsable"
+            responsable_txt = (
+                trabajador_seleccionado.get("nombre", "-")
+                if trabajador_seleccionado
+                else "Sin responsable"
+            )
 
             messagebox.showinfo(
                 "Éxito",
@@ -482,7 +631,8 @@ class SalidasTab(ctk.CTkFrame):
             )
 
             self.cargar_ultimos_movimientos()
-            self.limpiar_escaneo()
+            self.limpiar_formulario()
+            self.iniciar_carga_selectores()
 
         else:
             messagebox.showerror("Error", f"Fallo al registrar: {msg}", parent=self)
@@ -577,7 +727,7 @@ class SalidasTab(ctk.CTkFrame):
         tipo_medicion = prod_original.get("tipo_medicion") or "No aplica"
         unidad = prod_original.get("unidad_medida") or "unidad"
 
-        self.win_retazo = ctk.CTkToplevel(self)
+        self.win_retazo = VentanaAdaptable(self)
         self.win_retazo.title("Crear Retazo")
         self.win_retazo.geometry("520x680")
         self.win_retazo.minsize(520, 680)
@@ -634,7 +784,7 @@ class SalidasTab(ctk.CTkFrame):
             scroll,
             text=info,
             justify="left",
-            text_color="gray",
+            text_color=PALETA["texto_suave"],
             wraplength=440
         ).pack(pady=(5, 15))
 
@@ -727,7 +877,7 @@ class SalidasTab(ctk.CTkFrame):
         self.retazo_label_resultado = ctk.CTkLabel(
             scroll,
             text="Ingrese las medidas para calcular el precio.",
-            text_color="gray",
+            text_color=PALETA["texto_suave"],
             wraplength=430
         )
         self.retazo_label_resultado.pack(pady=8)
@@ -764,28 +914,26 @@ class SalidasTab(ctk.CTkFrame):
                         f"Precio sugerido: {self.formatear_pesos(precio_retazo)}\n"
                         f"Equivale al {porcentaje_valor}% del valor cortado."
                     ),
-                    text_color="green"
+                    text_color=PALETA["exito"]
                 )
 
             except Exception as e:
                 self.retazo_label_resultado.configure(
                     text=str(e),
-                    text_color="red"
+                    text_color=PALETA["peligro"]
                 )
 
         ctk.CTkButton(
             scroll,
             text="Calcular precio sugerido",
-            fg_color="#1f538d",
-            hover_color="#163c65",
+            **estilos_boton("fantasma"),
             command=calcular_y_mostrar
         ).pack(fill="x", padx=35, pady=(10, 6))
 
         ctk.CTkButton(
             scroll,
             text="Guardar retazo",
-            fg_color="green",
-            hover_color="darkgreen",
+            **estilos_boton("primario"),
             height=42,
             command=lambda: self.guardar_retazo_calculado(
                 prod_original=prod_original,
@@ -888,14 +1036,29 @@ class SalidasTab(ctk.CTkFrame):
                 medida_ancho = ancho if tipo_medicion == "Área" else None
                 unidad_retazo = unidad
 
+            dimensiones_originales = str(
+                prod_original.get("tamaño_dimensiones") or ""
+            )
+            if dimensiones_originales.startswith(
+                InventarioTab.PREFIJO_DIMENSIONES
+            ):
+                configuracion_retazo = InventarioTab.decodificar_dimensiones(
+                    prod_original
+                )
+                configuracion_retazo["principal"] = medida_largo
+                if tipo_medicion == "Área":
+                    configuracion_retazo["secundaria"] = medida_ancho
+                    configuracion_retazo["unidad_secundaria"] = unidad
+                configuracion_retazo["unidad_principal"] = unidad_retazo
+                tamano_retazo = InventarioTab.codificar_dimensiones(
+                    configuracion_retazo
+                )
+
             datos_retazo = {
                 "codigo_barras": nuevo_codigo,
                 "nombre": nombre_retazo,
                 "categoria": prod_original.get("categoria", "Materiales"),
-                "subcategoria": prod_original.get("subcategoria", ""),
-                "marca": prod_original.get("marca", ""),
                 "tamaño_dimensiones": tamano_retazo,
-                "talla": prod_original.get("talla", ""),
                 "precio_unitario": precio_final,
                 "ubicacion_id": prod_original.get("ubicacion_id"),
                 "tipo_medicion": tipo_retazo,
@@ -922,8 +1085,6 @@ class SalidasTab(ctk.CTkFrame):
                     parent=self.win_retazo
                 )
 
-            self.barcode.generar_codigo_barras(nuevo_codigo, nombre_retazo)
-
             messagebox.showinfo(
                 "Retazo creado",
                 (
@@ -938,7 +1099,8 @@ class SalidasTab(ctk.CTkFrame):
 
             self.win_retazo.destroy()
             self.cargar_ultimos_movimientos()
-            self.limpiar_escaneo()
+            self.limpiar_formulario()
+            self.iniciar_carga_selectores()
 
         except ValueError as e:
             messagebox.showerror(
@@ -961,16 +1123,12 @@ class SalidasTab(ctk.CTkFrame):
         if hasattr(self, "win_retazo") and self.win_retazo.winfo_exists():
             self.win_retazo.destroy()
         self.cargar_ultimos_movimientos()
-        self.limpiar_escaneo()
+        self.limpiar_formulario()
 
-    def limpiar_escaneo(self):
-        self.entrada_producto_salida.configure(state="normal")
-        self.entrada_producto_salida.delete(0, "end")
-
-        self.entrada_trabajador.configure(state="normal")
-        self.entrada_trabajador.delete(0, "end")
-        self.entrada_trabajador.configure(state="disabled")
-
+    def limpiar_formulario(self):
+        self.combo_proyecto.clear()
+        self.combo_producto.clear()
+        self.combo_trabajador.clear()
+        self.texto_comentario.delete("1.0", "end")
         self.label_estado.configure(text="")
-
-        self.after(200, self.entrada_producto_salida.focus_set)
+        self.after(200, self.combo_producto.focus_set)
