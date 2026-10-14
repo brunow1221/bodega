@@ -20,6 +20,8 @@ from utils.ui_theme import (
 
 
 class SalidasTab(ctk.CTkScrollableFrame):
+    TIPO_ENTREGA = "Entrega / Consumo"
+
     def __init__(
         self,
         master,
@@ -46,6 +48,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
         self._carga_ultimos_id = 0
         self.productos_selector = []
         self.trabajadores_selector = []
+        self.productos_entrega = []
 
         self.crear_interfaz()
 
@@ -105,7 +108,8 @@ class SalidasTab(ctk.CTkScrollableFrame):
             width=340,
             height=40,
             font=ctk.CTkFont(weight="bold"),
-            state="readonly"
+            state="readonly",
+            command=self.al_cambiar_tipo_movimiento,
         )
         self.combo_movimiento.grid(row=3, column=0, pady=(0, 12))
         self.combo_movimiento.set("Entrega / Consumo")
@@ -152,6 +156,95 @@ class SalidasTab(ctk.CTkScrollableFrame):
         self.combo_producto.grid(row=7, column=0, pady=(0, 12), ipady=6)
 
         # =========================
+        # ARTÍCULOS DE LA ENTREGA
+        # =========================
+        self.frame_productos_entrega = ctk.CTkFrame(
+            self.frame_contenedor,
+            **estilos_panel(),
+        )
+        self.frame_productos_entrega.grid(
+            row=8,
+            column=0,
+            padx=20,
+            pady=(0, 12),
+            sticky="ew",
+        )
+        self.frame_productos_entrega.grid_columnconfigure(0, weight=1)
+        self.frame_productos_entrega.grid_columnconfigure(1, weight=1)
+
+        self.btn_agregar_producto_entrega = ctk.CTkButton(
+            self.frame_productos_entrega,
+            text="Agregar artículo a la entrega",
+            height=36,
+            **estilos_boton("primario"),
+            command=self.agregar_producto_entrega,
+        )
+        self.btn_agregar_producto_entrega.grid(
+            row=0,
+            column=0,
+            padx=(10, 5),
+            pady=(10, 8),
+            sticky="ew",
+        )
+
+        self.btn_quitar_producto_entrega = ctk.CTkButton(
+            self.frame_productos_entrega,
+            text="Quitar seleccionado",
+            height=36,
+            **estilos_boton("secundario"),
+            command=self.quitar_producto_entrega,
+        )
+        self.btn_quitar_producto_entrega.grid(
+            row=0,
+            column=1,
+            padx=(5, 10),
+            pady=(10, 8),
+            sticky="ew",
+        )
+
+        columnas_entrega = ("N°", "Artículo", "Categoría", "Stock")
+        self.tabla_productos_entrega = ttk.Treeview(
+            self.frame_productos_entrega,
+            columns=columnas_entrega,
+            show="headings",
+            height=4,
+        )
+        for columna, ancho in {
+            "N°": 45,
+            "Artículo": 260,
+            "Categoría": 140,
+            "Stock": 70,
+        }.items():
+            self.tabla_productos_entrega.heading(columna, text=columna)
+            self.tabla_productos_entrega.column(
+                columna,
+                width=ancho,
+                anchor="center",
+            )
+        estilizar_treeview(self.tabla_productos_entrega)
+        self.tabla_productos_entrega.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            padx=10,
+            pady=(0, 6),
+            sticky="ew",
+        )
+
+        self.label_productos_entrega = ctk.CTkLabel(
+            self.frame_productos_entrega,
+            text="Agregue uno o más artículos antes de registrar la entrega.",
+            text_color=PALETA["texto_suave"],
+        )
+        self.label_productos_entrega.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            padx=10,
+            pady=(0, 10),
+        )
+
+        # =========================
         # RESPONSABLE OPCIONAL
         # =========================
         ctk.CTkLabel(
@@ -161,7 +254,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
                 "(escriba para buscar o abra la lista):"
             ),
             font=ctk.CTkFont(size=14, weight="bold")
-        ).grid(row=8, column=0, pady=(5, 5))
+        ).grid(row=9, column=0, pady=(5, 5))
 
         self.combo_trabajador = SearchableCombobox(
             self.frame_contenedor,
@@ -171,7 +264,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             width=52,
             font=("Segoe UI", 12)
         )
-        self.combo_trabajador.grid(row=9, column=0, pady=(0, 8), ipady=6)
+        self.combo_trabajador.grid(row=10, column=0, pady=(0, 8), ipady=6)
 
         self.btn_sin_responsable = ctk.CTkButton(
             self.frame_contenedor,
@@ -181,7 +274,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             **estilos_boton("secundario"),
             command=self.continuar_sin_responsable
         )
-        self.btn_sin_responsable.grid(row=10, column=0, pady=(0, 8))
+        self.btn_sin_responsable.grid(row=11, column=0, pady=(0, 8))
 
         # =========================
         # COMENTARIO OPCIONAL
@@ -190,7 +283,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             self.frame_contenedor,
             text="Comentario / Observación (opcional):",
             font=ctk.CTkFont(size=14, weight="bold")
-        ).grid(row=11, column=0, pady=(8, 5))
+        ).grid(row=12, column=0, pady=(8, 5))
 
         self.texto_comentario = ctk.CTkTextbox(
             self.frame_contenedor,
@@ -202,7 +295,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             border_width=1,
             text_color=PALETA["texto"]
         )
-        self.texto_comentario.grid(row=12, column=0, pady=(0, 8))
+        self.texto_comentario.grid(row=13, column=0, pady=(0, 8))
 
         # =========================
         # MENSAJE DE ESTADO
@@ -213,7 +306,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(size=14, weight="bold"),
             wraplength=520
         )
-        self.label_estado.grid(row=13, column=0, pady=(5, 12))
+        self.label_estado.grid(row=14, column=0, pady=(5, 12))
 
         # =========================
         # BOTONES
@@ -227,7 +320,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(size=15, weight="bold"),
             command=self.registrar_salida
         )
-        self.btn_registrar.grid(row=14, column=0, pady=(8, 8))
+        self.btn_registrar.grid(row=15, column=0, pady=(8, 8))
 
         self.btn_limpiar = ctk.CTkButton(
             self.frame_contenedor,
@@ -237,7 +330,7 @@ class SalidasTab(ctk.CTkScrollableFrame):
             **estilos_boton("secundario"),
             command=self.limpiar_formulario
         )
-        self.btn_limpiar.grid(row=15, column=0, pady=(0, 15))
+        self.btn_limpiar.grid(row=16, column=0, pady=(0, 15))
 
         # =========================
         # ÚLTIMOS MOVIMIENTOS
@@ -246,10 +339,10 @@ class SalidasTab(ctk.CTkScrollableFrame):
             self.frame_contenedor,
             text="Últimos 5 movimientos registrados",
             font=ctk.CTkFont(size=16, weight="bold")
-        ).grid(row=16, column=0, pady=(5, 5))
+        ).grid(row=17, column=0, pady=(5, 5))
 
         frame_ultimos = ctk.CTkFrame(self.frame_contenedor, **estilos_panel())
-        frame_ultimos.grid(row=17, column=0, padx=20, pady=(0, 25), sticky="ew")
+        frame_ultimos.grid(row=18, column=0, padx=20, pady=(0, 25), sticky="ew")
 
         columnas = ("Fecha", "Producto", "Responsable", "Movimiento / Proyecto", "Cant.")
 
@@ -279,6 +372,108 @@ class SalidasTab(ctk.CTkScrollableFrame):
         self.after(150, self.cargar_ultimos_movimientos)
         self.after(200, self.iniciar_carga_selectores)
         self.after(300, self.combo_producto.focus_set)
+        self.al_cambiar_tipo_movimiento(self.combo_movimiento.get())
+
+    def al_cambiar_tipo_movimiento(self, tipo_movimiento):
+        if not hasattr(self, "frame_productos_entrega"):
+            return
+        if tipo_movimiento == self.TIPO_ENTREGA:
+            self.frame_productos_entrega.grid()
+            self.btn_registrar.configure(text="Registrar entrega")
+        else:
+            self.frame_productos_entrega.grid_remove()
+            self.btn_registrar.configure(text="Registrar movimiento")
+
+    @staticmethod
+    def clave_producto(producto):
+        return str(
+            (producto or {}).get("id")
+            or (producto or {}).get("codigo_barras")
+            or ""
+        )
+
+    @classmethod
+    def preparar_lista_productos_entrega(cls, productos, producto_actual=None):
+        resultado = []
+        claves = set()
+        for producto in [*(productos or []), producto_actual]:
+            if not producto:
+                continue
+            clave = cls.clave_producto(producto)
+            if clave and clave not in claves:
+                resultado.append(producto)
+                claves.add(clave)
+        return resultado
+
+    def agregar_producto_entrega(self):
+        producto = self.combo_producto.get_selected()
+        if not producto:
+            return messagebox.showwarning(
+                "Aviso",
+                "Busque y seleccione el artículo que desea agregar.",
+                parent=self,
+            )
+
+        clave = self.clave_producto(producto)
+        if any(
+            self.clave_producto(item) == clave
+            for item in self.productos_entrega
+        ):
+            return messagebox.showwarning(
+                "Artículo repetido",
+                "El artículo seleccionado ya está incluido en la entrega.",
+                parent=self,
+            )
+
+        self.productos_entrega.append(producto)
+        self.combo_producto.clear()
+        self.actualizar_tabla_productos_entrega()
+        self.label_estado.configure(
+            text=(
+                f"{producto.get('nombre', 'Artículo')} agregado. "
+                "Puede buscar otro artículo o registrar la entrega."
+            ),
+            text_color=PALETA["exito"],
+        )
+        self.combo_producto.focus_set()
+
+    def quitar_producto_entrega(self):
+        seleccion = self.tabla_productos_entrega.selection()
+        if not seleccion:
+            return messagebox.showwarning(
+                "Aviso",
+                "Seleccione un artículo de la entrega para quitarlo.",
+                parent=self,
+            )
+        valores = self.tabla_productos_entrega.item(seleccion[0])["values"]
+        indice = int(valores[0]) - 1
+        if 0 <= indice < len(self.productos_entrega):
+            self.productos_entrega.pop(indice)
+        self.actualizar_tabla_productos_entrega()
+
+    def actualizar_tabla_productos_entrega(self):
+        for item in self.tabla_productos_entrega.get_children():
+            self.tabla_productos_entrega.delete(item)
+        for indice, producto in enumerate(self.productos_entrega, start=1):
+            self.tabla_productos_entrega.insert(
+                "",
+                "end",
+                values=(
+                    indice,
+                    producto.get("nombre", "-"),
+                    producto.get("categoria", "-"),
+                    int(producto.get("stock") or 0),
+                ),
+            )
+        cantidad = len(self.productos_entrega)
+        self.label_productos_entrega.configure(
+            text=(
+                f"{cantidad} artículo{'s' if cantidad != 1 else ''} "
+                "en esta entrega."
+                if cantidad
+                else "Agregue uno o más artículos antes de registrar la entrega."
+            )
+        )
 
     # ============================================================
     # PROYECTOS
@@ -394,14 +589,23 @@ class SalidasTab(ctk.CTkScrollableFrame):
         )
 
     def al_seleccionar_producto(self, producto):
+        es_entrega = self.combo_movimiento.get() == self.TIPO_ENTREGA
         self.label_estado.configure(
             text=(
                 f"Producto seleccionado: {producto.get('nombre', '-')} · "
                 f"Stock: {int(producto.get('stock') or 0)}"
+                + (
+                    " · Presione 'Agregar artículo a la entrega'."
+                    if es_entrega
+                    else ""
+                )
             ),
             text_color=PALETA["primario"]
         )
-        self.combo_trabajador.focus_set()
+        if es_entrega:
+            self.btn_agregar_producto_entrega.focus_set()
+        else:
+            self.combo_trabajador.focus_set()
 
     def al_seleccionar_trabajador(self, trabajador):
         self.label_estado.configure(
@@ -443,8 +647,16 @@ class SalidasTab(ctk.CTkScrollableFrame):
         self.combo_trabajador.clear()
         producto = self.combo_producto.get_selected()
         proyecto = self.combo_proyecto.get_selected()
+        hay_productos = bool(producto)
+        if self.combo_movimiento.get() == self.TIPO_ENTREGA:
+            hay_productos = bool(
+                self.preparar_lista_productos_entrega(
+                    self.productos_entrega,
+                    producto,
+                )
+            )
 
-        if producto and proyecto:
+        if hay_productos and proyecto:
             self.label_estado.configure(
                 text=(
                     "Movimiento sin responsable asociado.\n"
@@ -459,6 +671,151 @@ class SalidasTab(ctk.CTkScrollableFrame):
                 text_color=PALETA["alerta"]
             )
             self.combo_producto.focus_set()
+
+    def solicitar_cantidades_entrega(self, productos):
+        cantidades = []
+        total = len(productos)
+        for indice, producto in enumerate(productos, start=1):
+            stock = int(producto.get("stock") or 0)
+            while True:
+                dialogo = ctk.CTkInputDialog(
+                    title=f"Cantidad {indice} de {total}",
+                    text=(
+                        f"Artículo {indice} de {total}: "
+                        f"'{producto.get('nombre', '-')}'\n\n"
+                        f"Stock disponible: {stock}\n"
+                        "Ingrese la cantidad que desea entregar:"
+                    ),
+                )
+                respuesta = dialogo.get_input()
+                if respuesta is None:
+                    return None
+                try:
+                    cantidad = int(respuesta)
+                    if cantidad < 1 or cantidad > stock:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    messagebox.showerror(
+                        "Cantidad inválida",
+                        f"Ingrese un número entero entre 1 y {stock}.",
+                        parent=self,
+                    )
+                    continue
+                cantidades.append(cantidad)
+                break
+        return cantidades
+
+    def registrar_entrega_multiple(
+        self,
+        producto_actual,
+        trabajador,
+        proyecto,
+        comentario,
+    ):
+        productos_seleccionados = self.preparar_lista_productos_entrega(
+            self.productos_entrega,
+            producto_actual,
+        )
+        if not productos_seleccionados:
+            return messagebox.showwarning(
+                "Aviso",
+                "Agregue al menos un artículo a la entrega.",
+                parent=self,
+            )
+
+        productos = []
+        for seleccionado in productos_seleccionados:
+            codigo = seleccionado.get("codigo_barras")
+            producto = self.db.buscar_producto_por_codigo(codigo)
+            if not producto:
+                return messagebox.showerror(
+                    "Artículo no disponible",
+                    (
+                        f"'{seleccionado.get('nombre', '-')}' ya no existe, "
+                        "está inactivo o no se pudo consultar."
+                    ),
+                    parent=self,
+                )
+            if int(producto.get("stock") or 0) < 1:
+                return messagebox.showerror(
+                    "Sin stock",
+                    f"'{producto.get('nombre', '-')}' no tiene stock disponible.",
+                    parent=self,
+                )
+            productos.append(producto)
+
+        incluye_epp = any(
+            str(producto.get("categoria") or "").strip().casefold() == "epp"
+            for producto in productos
+        )
+        if incluye_epp and not trabajador:
+            return messagebox.showwarning(
+                "Responsable requerido",
+                "La entrega contiene EPP. Seleccione al trabajador que los recibe.",
+                parent=self,
+            )
+
+        cantidades = self.solicitar_cantidades_entrega(productos)
+        if cantidades is None:
+            return
+
+        rut_trabajador = trabajador.get("rut", "") if trabajador else ""
+        entregados = []
+        for producto, cantidad in zip(productos, cantidades):
+            exito, mensaje = self.db.registrar_movimiento_camara(
+                rut_trabajador,
+                producto.get("codigo_barras"),
+                self.TIPO_ENTREGA,
+                producto["id"],
+                int(producto.get("stock") or 0),
+                cantidad,
+                proyecto,
+                comentario,
+            )
+            if not exito:
+                claves_entregadas = {
+                    self.clave_producto(item) for item, _ in entregados
+                }
+                self.productos_entrega = [
+                    item for item in self.productos_entrega
+                    if self.clave_producto(item) not in claves_entregadas
+                ]
+                self.actualizar_tabla_productos_entrega()
+                self.cargar_ultimos_movimientos()
+                self.iniciar_carga_selectores()
+                return messagebox.showerror(
+                    "Entrega incompleta",
+                    (
+                        f"Se registraron {len(entregados)} de "
+                        f"{len(productos)} artículos.\n\n"
+                        f"Falló '{producto.get('nombre', '-')}': {mensaje}\n\n"
+                        "Los artículos pendientes permanecen en la lista."
+                    ),
+                    parent=self,
+                )
+            entregados.append((producto, cantidad))
+
+        if incluye_epp and callable(self.on_epp_registrado):
+            self.on_epp_registrado()
+
+        responsable = trabajador.get("nombre", "-") if trabajador else "Sin responsable"
+        resumen = "\n".join(
+            f"• {producto.get('nombre', '-')}: {cantidad}"
+            for producto, cantidad in entregados
+        )
+        messagebox.showinfo(
+            "Entrega registrada",
+            (
+                f"Se registraron {len(entregados)} artículos correctamente.\n\n"
+                f"{resumen}\n\n"
+                f"Proyecto: {proyecto}\n"
+                f"Responsable: {responsable}"
+            ),
+            parent=self,
+        )
+        self.cargar_ultimos_movimientos()
+        self.limpiar_formulario()
+        self.iniciar_carga_selectores()
 
     # ============================================================
     # REGISTRAR MOVIMIENTO
@@ -482,6 +839,21 @@ class SalidasTab(ctk.CTkScrollableFrame):
                 "Busque un proyecto y selecciónelo desde la lista antes de registrar el movimiento."
             )
 
+        if self.combo_trabajador.get().strip() and not trabajador_seleccionado:
+            return messagebox.showwarning(
+                "Aviso",
+                "Seleccione al trabajador desde la lista o use "
+                "'Continuar sin responsable'."
+            )
+
+        if tipo_movimiento == self.TIPO_ENTREGA:
+            return self.registrar_entrega_multiple(
+                producto_seleccionado,
+                trabajador_seleccionado,
+                proyecto,
+                comentario,
+            )
+
         if not producto_seleccionado:
             return messagebox.showwarning(
                 "Aviso",
@@ -495,23 +867,6 @@ class SalidasTab(ctk.CTkScrollableFrame):
             return messagebox.showerror(
                 "Error",
                 "El producto no existe en la base de datos o está inactivo."
-            )
-
-        if self.combo_trabajador.get().strip() and not trabajador_seleccionado:
-            return messagebox.showwarning(
-                "Aviso",
-                "Seleccione al trabajador desde la lista o use "
-                "'Continuar sin responsable'."
-            )
-
-        es_entrega_epp = (
-            tipo_movimiento == "Entrega / Consumo"
-            and str(producto.get("categoria") or "").strip().casefold() == "epp"
-        )
-        if es_entrega_epp and not trabajador_seleccionado:
-            return messagebox.showwarning(
-                "Responsable requerido",
-                "Para entregar un EPP debe seleccionar al trabajador que lo recibe."
             )
 
         es_entrega_herramienta_personal = (
@@ -574,8 +929,6 @@ class SalidasTab(ctk.CTkScrollableFrame):
         )
 
         if exito:
-            if es_entrega_epp and callable(self.on_epp_registrado):
-                self.on_epp_registrado()
             if (
                 es_entrega_herramienta_personal
                 and callable(self.on_herramienta_personal_registrada)
@@ -1129,6 +1482,9 @@ class SalidasTab(ctk.CTkScrollableFrame):
         self.combo_proyecto.clear()
         self.combo_producto.clear()
         self.combo_trabajador.clear()
+        self.productos_entrega = []
+        if hasattr(self, "tabla_productos_entrega"):
+            self.actualizar_tabla_productos_entrega()
         self.texto_comentario.delete("1.0", "end")
         self.label_estado.configure(text="")
         self.after(200, self.combo_producto.focus_set)
