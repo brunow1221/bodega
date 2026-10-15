@@ -459,4 +459,3 @@ class VentanaFacturasProducto(VentanaAdaptable):
             **estilos_boton("primario"),
             command=guardar,
         ).pack(fill="x", padx=18, pady=(12, 16))
-

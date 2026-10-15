@@ -205,4 +205,3 @@ class RegistroFacturaDocumental:
         if not exito:
             self.almacen.eliminar(referencia)
         return exito, mensaje, datos
-
