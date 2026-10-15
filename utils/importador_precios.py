@@ -1,8 +1,40 @@
 from decimal import Decimal, InvalidOperation
 import re
+import sys
 import unicodedata
 
-from openpyxl import load_workbook
+
+def _importar_load_workbook():
+    """Carga openpyxl sin depender de instalaciones incompletas de NumPy."""
+    ausente = object()
+    numpy_previo = sys.modules.get("numpy", ausente)
+    numpy_bloqueado = False
+
+    try:
+        import numpy as numpy_opcional
+    except ImportError:
+        pass
+    else:
+        if not hasattr(numpy_opcional, "short"):
+            # openpyxl admite funcionar sin NumPy, pero falla si encuentra un
+            # paquete incompleto. Bloquearlo temporalmente hace que use sus
+            # tipos numéricos nativos de Python.
+            sys.modules["numpy"] = None
+            numpy_bloqueado = True
+
+    try:
+        from openpyxl import load_workbook as cargar_libro
+    finally:
+        if numpy_bloqueado:
+            if numpy_previo is ausente:
+                sys.modules.pop("numpy", None)
+            else:
+                sys.modules["numpy"] = numpy_previo
+
+    return cargar_libro
+
+
+load_workbook = _importar_load_workbook()
 
 
 HOJA_PRECIOS = "Precios referenciales"

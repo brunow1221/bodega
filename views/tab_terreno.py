@@ -19,23 +19,53 @@ class TerrenoTab(ctk.CTkFrame):
         self.crear_interfaz()
 
     def crear_interfaz(self):
-        frame_top = ctk.CTkFrame(self, **estilos_barra())
-        frame_top.pack(fill="x", pady=10, padx=10)
+        self.frame_top = ctk.CTkFrame(self, **estilos_barra())
+        self.frame_top.pack(fill="x", pady=10, padx=10)
+        self.frame_top.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkButton(frame_top, text="Refrescar Préstamos", command=self.iniciar_carga_hilo).pack(side="left")
-        try:
-            frame_top.winfo_children()[-1].configure(**estilos_boton("primario"))
-        except Exception:
-            pass
+        self.titulo_terreno = ctk.CTkLabel(
+            self.frame_top,
+            text="Control de Activos Fuera de Bodega",
+            font=ctk.CTkFont(size=14, slant="italic"),
+            anchor="e",
+            justify="right",
+        )
+        self.titulo_terreno.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=12,
+            pady=(8, 4),
+        )
+
+        self.fila_acciones = ctk.CTkFrame(self.frame_top, fg_color="transparent")
+        self.fila_acciones.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=12,
+            pady=(4, 8),
+        )
+        self.fila_acciones.grid_columnconfigure(1, weight=1)
+
+        self.boton_refrescar = ctk.CTkButton(
+            self.fila_acciones,
+            text="Refrescar Préstamos",
+            command=self.iniciar_carga_hilo,
+            **estilos_boton("primario"),
+        )
+        self.boton_refrescar.grid(row=0, column=0, sticky="w")
 
         self.label_estado = ctk.CTkLabel(
-            frame_top,
+            self.fila_acciones,
             text="",
-            text_color=color_estado("info")
+            text_color=color_estado("info"),
+            anchor="w",
+            justify="left",
         )
-        self.label_estado.pack(side="left", padx=10)
+        self.label_estado.grid(row=0, column=1, sticky="ew", padx=(12, 0))
 
-        ctk.CTkLabel(frame_top, text="Control de Activos Fuera de Bodega", font=ctk.CTkFont(size=14, slant="italic")).pack(side="right", padx=10)
+        self.frame_top.bind("<Configure>", self._ajustar_textos_encabezado)
 
         columnas = (
             "Producto",
@@ -57,6 +87,14 @@ class TerrenoTab(ctk.CTkFrame):
         self.tabla_terreno.pack(fill="both", expand=True, padx=8, pady=8)
         self.after(3500, self.iniciar_carga_hilo)
         estilizar_treeview(self.tabla_terreno)
+
+    def _ajustar_textos_encabezado(self, event):
+        ancho_interior = max(160, event.width - 32)
+        self.titulo_terreno.configure(wraplength=ancho_interior)
+
+        ancho_boton = self.boton_refrescar.winfo_reqwidth()
+        ancho_estado = max(120, ancho_interior - ancho_boton - 20)
+        self.label_estado.configure(wraplength=ancho_estado)
 
     # NUEVAS FUNCIONES DE HILOS
     def iniciar_carga_hilo(self):

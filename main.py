@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import os
+import tkinter as tk
 import traceback
 from tkinter import TclError, ttk, messagebox
 
@@ -25,35 +26,43 @@ from utils import obtener_ruta_icono
 from utils.ui_zoom import (
     PASO_ZOOM,
     ZOOM_PREDETERMINADO,
+    cargar_tema,
     cargar_zoom,
+    guardar_tema,
     guardar_zoom,
     normalizar_zoom,
 )
 from utils.ui_theme import (
     PALETA,
     aplicar_tema_base,
+    color_actual,
     configurar_treeview_global,
     estilos_barra,
     estilos_boton,
     estilos_panel,
+    estilizar_treeview,
 )
-
-
-aplicar_tema_base()
+from utils.ui_windows import (
+    VentanaAdaptable,
+    area_disponible,
+    dimensiones_ventana_principal,
+)
 
 
 class AplicacionBodega(ctk.CTk):
     def __init__(self):
+        tema_inicial = cargar_tema()
+        aplicar_tema_base(tema_inicial)
         super().__init__()
 
         self.usuario_actual = None
         self.rol_actual = None
+        self.tema_actual = tema_inicial
         self.zoom_porcentaje = cargar_zoom()
         self.aplicar_zoom(self.zoom_porcentaje, guardar=False)
 
         self.title("Sistema de Gestión de Bodega")
-        self.geometry("1200x800")
-        self.minsize(1200, 800)
+        self.configurar_tamano_inicial()
         self.configure(fg_color=PALETA["fondo"])
 
         # Ocultar ventana principal hasta que todo esté listo
@@ -152,7 +161,7 @@ class AplicacionBodega(ctk.CTk):
     # LOGIN
     # ============================================================
     def mostrar_login(self):
-        login = ctk.CTkToplevel(self)
+        login = VentanaAdaptable(self)
         login.title("Iniciar Sesión")
         login.geometry("420x360")
         login.resizable(False, False)
@@ -290,6 +299,7 @@ class AplicacionBodega(ctk.CTk):
 
         self.frame_superior = ctk.CTkFrame(self, **estilos_barra())
         self.frame_superior.pack(fill="x", padx=20, pady=(12, 0))
+        self.frame_superior.grid_columnconfigure(0, weight=1)
 
         self.label_sesion = ctk.CTkLabel(
             self.frame_superior,
@@ -297,22 +307,41 @@ class AplicacionBodega(ctk.CTk):
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color=PALETA["texto_suave"]
         )
-        self.label_sesion.pack(side="left", padx=14, pady=10)
+        self.label_sesion.grid(
+            row=0, column=0, sticky="w", padx=14, pady=10
+        )
+
+        self.frame_controles = ctk.CTkFrame(
+            self.frame_superior,
+            fg_color="transparent",
+        )
+        self.frame_controles.grid(
+            row=0, column=1, sticky="e", padx=(4, 8), pady=4
+        )
 
         self.boton_estadisticas = ctk.CTkButton(
-            self.frame_superior,
+            self.frame_controles,
             text="Ver estadísticas",
             width=125,
             **estilos_boton("fantasma"),
             command=self.abrir_estadisticas,
         )
-        self.boton_estadisticas.pack(side="right", padx=(4, 10), pady=6)
+        self.boton_estadisticas.pack(side="right", padx=4, pady=2)
+
+        self.boton_tema = ctk.CTkButton(
+            self.frame_controles,
+            text=self.texto_boton_tema(),
+            width=118,
+            **estilos_boton("fantasma"),
+            command=self.alternar_tema,
+        )
+        self.boton_tema.pack(side="right", padx=4, pady=2)
 
         frame_zoom = ctk.CTkFrame(
-            self.frame_superior,
+            self.frame_controles,
             fg_color="transparent"
         )
-        frame_zoom.pack(side="right", padx=10, pady=6)
+        frame_zoom.pack(side="right", padx=6, pady=2)
 
         ctk.CTkLabel(
             frame_zoom,
@@ -350,6 +379,10 @@ class AplicacionBodega(ctk.CTk):
             command=self.aumentar_zoom
         ).pack(side="left", padx=2)
 
+        self._barra_compacta = None
+        self.frame_superior.bind(
+            "<Configure>", self.adaptar_barra_superior, add="+"
+        )
         self.configurar_atajos_zoom()
 
         self.tabview = ctk.CTkTabview(
@@ -382,7 +415,7 @@ class AplicacionBodega(ctk.CTk):
             )
 
             self.vista_herramientas_personales = HerramientasPersonalesTab(
-                self.tabview.add("Herr. Personales"),
+                self.tabview.add("Herr. pers."),
                 self.db
             )
             self.vista_herramientas_personales.pack(fill="both", expand=True)
@@ -390,32 +423,7 @@ class AplicacionBodega(ctk.CTk):
                 self.vista_herramientas_personales.iniciar_carga
             )
 
-            self.vista_inventario = InventarioTab(
-                self.tabview.add("Inventario"),
-                self.db
-            )
-            self.vista_inventario.pack(fill="both", expand=True)
-
-            self.vista_cafeteria = InventarioTab(
-                self.tabview.add("Cafetería"),
-                self.db,
-                solo_cafeteria=True
-            )
-            self.vista_cafeteria.pack(fill="both", expand=True)
-
-            self.vista_aseo = InventarioTab(
-                self.tabview.add("Aseo"),
-                self.db,
-                solo_aseo=True
-            )
-            self.vista_aseo.pack(fill="both", expand=True)
-
-            self.vista_libreria = InventarioTab(
-                self.tabview.add("Librería"),
-                self.db,
-                solo_libreria=True
-            )
-            self.vista_libreria.pack(fill="both", expand=True)
+            self.crear_pestanas_inventario()
 
             self.vista_mapa_bodega = MapaBodegaTab(
                 self.tabview.add("Sectores"),
@@ -430,7 +438,7 @@ class AplicacionBodega(ctk.CTk):
             self.vista_terreno.pack(fill="both", expand=True)
 
             self.vista_trabajadores = TrabajadoresTab(
-                self.tabview.add("Trabajadores"),
+                self.tabview.add("Personal"),
                 self.db
             )
             self.vista_trabajadores.pack(fill="both", expand=True)
@@ -442,7 +450,7 @@ class AplicacionBodega(ctk.CTk):
             self.vista_proyectos.pack(fill="both", expand=True)
 
             self.vista_consumo_proyecto = ConsumoProyectoTab(
-                self.tabview.add("Consumo Proyectos"),
+                self.tabview.add("Consumo"),
                 self.db
             )
             self.vista_consumo_proyecto.pack(fill="both", expand=True)
@@ -455,32 +463,7 @@ class AplicacionBodega(ctk.CTk):
 
         # Consulta solo puede ver inventario y terreno
         elif rol == "Consulta":
-            self.vista_inventario = InventarioTab(
-                self.tabview.add("Inventario"),
-                self.db
-            )
-            self.vista_inventario.pack(fill="both", expand=True)
-
-            self.vista_cafeteria = InventarioTab(
-                self.tabview.add("Cafetería"),
-                self.db,
-                solo_cafeteria=True
-            )
-            self.vista_cafeteria.pack(fill="both", expand=True)
-
-            self.vista_aseo = InventarioTab(
-                self.tabview.add("Aseo"),
-                self.db,
-                solo_aseo=True
-            )
-            self.vista_aseo.pack(fill="both", expand=True)
-
-            self.vista_libreria = InventarioTab(
-                self.tabview.add("Librería"),
-                self.db,
-                solo_libreria=True
-            )
-            self.vista_libreria.pack(fill="both", expand=True)
+            self.crear_pestanas_inventario()
 
             self.vista_terreno = TerrenoTab(
                 self.tabview.add("Terreno"),
@@ -490,38 +473,53 @@ class AplicacionBodega(ctk.CTk):
 
         # Si por error viene un rol no reconocido, se deja como consulta
         else:
-            self.vista_inventario = InventarioTab(
-                self.tabview.add("Inventario"),
-                self.db
-            )
-            self.vista_inventario.pack(fill="both", expand=True)
-
-            self.vista_cafeteria = InventarioTab(
-                self.tabview.add("Cafetería"),
-                self.db,
-                solo_cafeteria=True
-            )
-            self.vista_cafeteria.pack(fill="both", expand=True)
-
-            self.vista_aseo = InventarioTab(
-                self.tabview.add("Aseo"),
-                self.db,
-                solo_aseo=True
-            )
-            self.vista_aseo.pack(fill="both", expand=True)
-
-            self.vista_libreria = InventarioTab(
-                self.tabview.add("Librería"),
-                self.db,
-                solo_libreria=True
-            )
-            self.vista_libreria.pack(fill="both", expand=True)
+            self.crear_pestanas_inventario()
 
             self.vista_terreno = TerrenoTab(
                 self.tabview.add("Terreno"),
                 self.db
             )
             self.vista_terreno.pack(fill="both", expand=True)
+
+    def crear_pestanas_inventario(self):
+        contenedor = self.tabview.add("Stock")
+        self.tabview_inventarios = ctk.CTkTabview(
+            contenedor,
+            fg_color=PALETA["panel"],
+            segmented_button_fg_color=PALETA["primario_suave"],
+            segmented_button_selected_color=PALETA["primario"],
+            segmented_button_selected_hover_color=PALETA["primario_hover"],
+            segmented_button_unselected_color=PALETA["primario_suave"],
+            segmented_button_unselected_hover_color=PALETA["borde"],
+            text_color=PALETA["texto"],
+        )
+        self.tabview_inventarios.pack(fill="both", expand=True)
+
+        self.vista_inventario = InventarioTab(
+            self.tabview_inventarios.add("General"), self.db
+        )
+        self.vista_cafeteria = InventarioTab(
+            self.tabview_inventarios.add("Cafetería"),
+            self.db,
+            solo_cafeteria=True,
+        )
+        self.vista_aseo = InventarioTab(
+            self.tabview_inventarios.add("Aseo"),
+            self.db,
+            solo_aseo=True,
+        )
+        self.vista_libreria = InventarioTab(
+            self.tabview_inventarios.add("Librería"),
+            self.db,
+            solo_libreria=True,
+        )
+        for vista in (
+            self.vista_inventario,
+            self.vista_cafeteria,
+            self.vista_aseo,
+            self.vista_libreria,
+        ):
+            vista.pack(fill="both", expand=True)
 
     # ============================================================
     # PERMISOS POR ROL
@@ -667,6 +665,65 @@ class AplicacionBodega(ctk.CTk):
         for secuencia in ("<Control-0>", "<Control-KP_0>"):
             self.bind_all(secuencia, self.restablecer_zoom, add="+")
 
+    def adaptar_barra_superior(self, event):
+        ancho = event.width / self.frame_superior._get_widget_scaling()
+        compacta = ancho < 1050
+        if compacta == self._barra_compacta:
+            return
+        self._barra_compacta = compacta
+
+        if compacta:
+            self.label_sesion.grid_configure(
+                row=0, column=0, columnspan=2, sticky="w",
+            )
+            self.frame_controles.grid_configure(
+                row=1, column=0, columnspan=2, sticky="e",
+            )
+        else:
+            self.label_sesion.grid_configure(
+                row=0, column=0, columnspan=1, sticky="w",
+            )
+            self.frame_controles.grid_configure(
+                row=0, column=1, columnspan=1, sticky="e",
+            )
+
+    def texto_boton_tema(self):
+        return "☀ Modo claro" if self.tema_actual == "Dark" else "🌙 Modo oscuro"
+
+    def alternar_tema(self):
+        self.tema_actual = "Light" if self.tema_actual == "Dark" else "Dark"
+        ctk.set_appearance_mode(self.tema_actual)
+        guardar_tema(self.tema_actual)
+
+        if hasattr(self, "boton_tema"):
+            self.boton_tema.configure(text=self.texto_boton_tema())
+
+        self.configurar_estilo_tablas()
+        self.actualizar_treeviews(self)
+
+        vista_estadisticas = getattr(self, "vista_estadisticas", None)
+        try:
+            if vista_estadisticas is not None and vista_estadisticas.winfo_exists():
+                vista_estadisticas.aplicar_tema()
+        except TclError:
+            pass
+
+    def actualizar_treeviews(self, widget):
+        try:
+            if isinstance(widget, ttk.Treeview):
+                estilizar_treeview(widget)
+            elif isinstance(widget, tk.Listbox):
+                widget.configure(
+                    background=color_actual(PALETA["panel_alt"]),
+                    foreground=color_actual(PALETA["texto"]),
+                    selectbackground=color_actual(PALETA["seleccion"]),
+                    selectforeground="white",
+                )
+            for hijo in widget.winfo_children():
+                self.actualizar_treeviews(hijo)
+        except TclError:
+            pass
+
     def aplicar_zoom(self, porcentaje, guardar=True):
         self.zoom_porcentaje = normalizar_zoom(porcentaje)
         escala = self.zoom_porcentaje / 100
@@ -707,20 +764,33 @@ class AplicacionBodega(ctk.CTk):
         return "break" if event is not None else None
 
     def preparar_ventana_principal(self):
+        self.configurar_tamano_inicial()
+
+    def configurar_tamano_inicial(self):
         try:
-            ancho = self.winfo_screenwidth()
-            alto = self.winfo_screenheight()
-            self.geometry(f"{ancho}x{alto}+0+0")
+            self.update_idletasks()
+            izquierda, arriba, area_ancho, area_alto = area_disponible(self)
+            escala = self._get_window_scaling()
+            ancho, alto, minimo_ancho, minimo_alto = (
+                dimensiones_ventana_principal(
+                    area_ancho,
+                    area_alto,
+                    escala,
+                )
+            )
+            x = izquierda + max(0, int((area_ancho - ancho * escala) / 2))
+            y = arriba + max(0, int((area_alto - alto * escala) / 2))
+            self.minsize(minimo_ancho, minimo_alto)
+            self.geometry(f"{ancho}x{alto}{x:+d}{y:+d}")
         except Exception:
+            self.minsize(800, 560)
             self.geometry("1200x800")
 
     def maximizar_ventana(self):
         try:
             self.state("zoomed")
         except Exception:
-            self.geometry(
-                f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0"
-            )
+            self.configurar_tamano_inicial()
 
     def verificar_actualizacion(self):
         try:

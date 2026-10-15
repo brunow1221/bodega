@@ -33,10 +33,26 @@ def _cargar_env_local():
 
 _cargar_env_local()
 
-VERSION_APP = "1.0.0"
+VERSION_APP = "1.1.2"
 
-URL_SUPABASE = os.environ.get("SUPABASE_URL", "").strip()
-KEY_SUPABASE = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "").strip()
+SUPABASE_URL_PREDETERMINADA = "https://vqxvuwepzzexnmhenitt.supabase.co"
+SUPABASE_PUBLISHABLE_KEY_PREDETERMINADA = (
+    "sb_publishable_SZvlgGCY-HB22e5vjslWHA_u55DOdSe"
+)
+
+
+def _obtener_configuracion(nombre, valor_predeterminado):
+    return os.environ.get(nombre, valor_predeterminado).strip()
+
+
+URL_SUPABASE = _obtener_configuracion(
+    "SUPABASE_URL",
+    SUPABASE_URL_PREDETERMINADA,
+)
+KEY_SUPABASE = _obtener_configuracion(
+    "SUPABASE_PUBLISHABLE_KEY",
+    SUPABASE_PUBLISHABLE_KEY_PREDETERMINADA,
+)
 
 VERIFICAR_ACTUALIZACIONES = (
     os.environ.get("VERIFICAR_ACTUALIZACIONES", "0").strip().lower()

@@ -17,18 +17,31 @@ class HistorialTab(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         # --- Encabezado ---
-        frame_top = ctk.CTkFrame(self, **estilos_barra())
-        frame_top.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-        
-        ctk.CTkLabel(frame_top, text="Últimos 100 Movimientos (Solo Lectura)", font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
+        self.frame_top = ctk.CTkFrame(self, **estilos_barra())
+        self.frame_top.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        self.frame_top.grid_columnconfigure(0, weight=1)
+
+        self.titulo_historial = ctk.CTkLabel(
+            self.frame_top,
+            text="Últimos 100 Movimientos (Solo Lectura)",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            anchor="w",
+            justify="left",
+        )
+        self.titulo_historial.grid(
+            row=0, column=0, sticky="ew", padx=12, pady=(10, 4)
+        )
         
         self.btn_refrescar = ctk.CTkButton(
-            frame_top,
+            self.frame_top,
             text="Refrescar Historial",
             **estilos_boton("primario"),
             command=self.iniciar_carga_hilo
         )
-        self.btn_refrescar.pack(side="right")
+        self.btn_refrescar.grid(
+            row=1, column=0, sticky="e", padx=12, pady=(4, 10)
+        )
+        self.frame_top.bind("<Configure>", self._ajustar_titulo)
 
         # --- Tabla ---
         frame_tabla = ctk.CTkFrame(self, **estilos_panel())
@@ -54,6 +67,9 @@ class HistorialTab(ctk.CTkFrame):
         
         # Colores cebra
         estilizar_treeview(self.tabla)
+
+    def _ajustar_titulo(self, event):
+        self.titulo_historial.configure(wraplength=max(220, event.width - 32))
 
     def iniciar_carga_hilo(self):
         self.btn_refrescar.configure(state="disabled", text="Cargando...")

@@ -110,44 +110,69 @@ class PgpTab(ctk.CTkFrame):
         self.tab_nuevo.grid_columnconfigure(0, weight=1)
         self.tab_nuevo.grid_rowconfigure(1, weight=1)
 
-        encabezado = ctk.CTkFrame(self.tab_nuevo, **estilos_barra())
-        encabezado.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
-        encabezado.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            encabezado,
+        self.encabezado_nuevo = ctk.CTkFrame(
+            self.tab_nuevo, **estilos_barra()
+        )
+        self.encabezado_nuevo.grid(
+            row=0, column=0, sticky="ew", padx=8, pady=(8, 6)
+        )
+        self.encabezado_nuevo.grid_columnconfigure(0, weight=1)
+        self.titulo_nuevo = ctk.CTkLabel(
+            self.encabezado_nuevo,
             text="Preparar contenedor para proyecto",
             font=ctk.CTkFont(size=22, weight="bold"),
             text_color=PALETA["primario"],
-        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 2))
-        ctk.CTkLabel(
-            encabezado,
+            anchor="w",
+            justify="left",
+        )
+        self.titulo_nuevo.grid(
+            row=0, column=0, sticky="ew", padx=14, pady=(12, 2)
+        )
+        self.descripcion_nuevo = ctk.CTkLabel(
+            self.encabezado_nuevo,
             text=(
                 "Agrupe entregas y préstamos en un solo despacho. "
                 "El stock se actualizará al registrar el PGP."
             ),
             text_color=PALETA["texto_suave"],
-        ).grid(row=1, column=0, sticky="w", padx=14, pady=(0, 12))
+            anchor="w",
+            justify="left",
+        )
+        self.descripcion_nuevo.grid(
+            row=1, column=0, sticky="ew", padx=14, pady=(0, 4)
+        )
         self.label_estado_nuevo = ctk.CTkLabel(
-            encabezado,
+            self.encabezado_nuevo,
             text="Cargando datos...",
             text_color=color_estado("cargando"),
+            anchor="w",
         )
         self.label_estado_nuevo.grid(
-            row=0, column=1, rowspan=2, sticky="e", padx=14
+            row=2, column=0, sticky="ew", padx=14, pady=(0, 12)
+        )
+        self.encabezado_nuevo.bind(
+            "<Configure>", self._ajustar_textos_nuevo
         )
 
-        contenido = ctk.CTkFrame(self.tab_nuevo, fg_color="transparent")
-        contenido.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        contenido.grid_columnconfigure(0, weight=0, minsize=390)
-        contenido.grid_columnconfigure(1, weight=1)
-        contenido.grid_rowconfigure(0, weight=1)
+        self.contenido_nuevo = ctk.CTkFrame(
+            self.tab_nuevo, fg_color="transparent"
+        )
+        self.contenido_nuevo.grid(
+            row=1, column=0, sticky="nsew", padx=8, pady=(0, 8)
+        )
+        self.contenido_nuevo.grid_columnconfigure(0, weight=0, minsize=390)
+        self.contenido_nuevo.grid_columnconfigure(1, weight=1)
+        self.contenido_nuevo.grid_rowconfigure(0, weight=1)
 
-        formulario = ctk.CTkScrollableFrame(
-            contenido,
+        self.formulario_nuevo = ctk.CTkScrollableFrame(
+            self.contenido_nuevo,
             width=370,
             **estilos_panel(),
         )
-        formulario.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.formulario_nuevo.grid(
+            row=0, column=0, sticky="nsew", padx=(0, 6)
+        )
+        formulario = self.formulario_nuevo
 
         ctk.CTkLabel(
             formulario,
@@ -244,7 +269,10 @@ class PgpTab(ctk.CTkFrame):
             command=self.agregar_item,
         ).pack(fill="x", padx=12, pady=(4, 14))
 
-        panel_carga = ctk.CTkFrame(contenido, **estilos_panel())
+        panel_carga = ctk.CTkFrame(
+            self.contenido_nuevo, **estilos_panel()
+        )
+        self.panel_carga = panel_carga
         panel_carga.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         panel_carga.grid_columnconfigure(0, weight=1)
         panel_carga.grid_rowconfigure(1, weight=1)
@@ -298,18 +326,19 @@ class PgpTab(ctk.CTkFrame):
 
         acciones = ctk.CTkFrame(panel_carga, fg_color="transparent")
         acciones.grid(row=2, column=0, sticky="ew", padx=12, pady=12)
+        acciones.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(
             acciones,
             text="Quitar seleccionado",
             **estilos_boton("peligro"),
             command=self.quitar_item,
-        ).pack(side="left", padx=(0, 6))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ctk.CTkButton(
             acciones,
             text="Vaciar",
             **estilos_boton("secundario"),
             command=self.vaciar_carga,
-        ).pack(side="left", padx=6)
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self.btn_despachar = ctk.CTkButton(
             acciones,
             text="Registrar y despachar PGP",
@@ -317,7 +346,48 @@ class PgpTab(ctk.CTkFrame):
             **estilos_boton("exito"),
             command=self.registrar_pgp,
         )
-        self.btn_despachar.pack(side="right", padx=(6, 0))
+        self.btn_despachar.grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+        )
+
+        self._nuevo_compacto = None
+        self.contenido_nuevo.bind(
+            "<Configure>", self._ajustar_distribucion_nuevo
+        )
+
+    def _ajustar_textos_nuevo(self, event):
+        ancho = max(240, event.width - 36)
+        self.titulo_nuevo.configure(wraplength=ancho)
+        self.descripcion_nuevo.configure(wraplength=ancho)
+
+    def _ajustar_distribucion_nuevo(self, event):
+        compacto = event.width < 1300
+        if compacto == self._nuevo_compacto:
+            return
+        self._nuevo_compacto = compacto
+
+        if compacto:
+            self.contenido_nuevo.grid_columnconfigure(0, weight=1, minsize=0)
+            self.contenido_nuevo.grid_columnconfigure(1, weight=0, minsize=0)
+            self.contenido_nuevo.grid_rowconfigure((0, 1), weight=1)
+            self.formulario_nuevo.grid_configure(
+                row=0, column=0, sticky="nsew", padx=0, pady=(0, 6)
+            )
+            self.panel_carga.grid_configure(
+                row=1, column=0, sticky="nsew", padx=0, pady=(6, 0)
+            )
+            return
+
+        self.contenido_nuevo.grid_columnconfigure(0, weight=0, minsize=390)
+        self.contenido_nuevo.grid_columnconfigure(1, weight=1, minsize=0)
+        self.contenido_nuevo.grid_rowconfigure(0, weight=1)
+        self.contenido_nuevo.grid_rowconfigure(1, weight=0)
+        self.formulario_nuevo.grid_configure(
+            row=0, column=0, sticky="nsew", padx=(0, 6), pady=0
+        )
+        self.panel_carga.grid_configure(
+            row=0, column=1, sticky="nsew", padx=(6, 0), pady=0
+        )
 
     def crear_tab_historial(self):
         self.tab_historial.grid_columnconfigure(0, weight=1)

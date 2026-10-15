@@ -1,5 +1,5 @@
 #define MyAppName "Sistema de Gestión de Bodega"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.2"
 #define MyAppPublisher "Bruno Warner F."
 #define MyAppExeName "SistemaBodega.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={localappdata}\Programs\SistemaBodega
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer_output
-OutputBaseFilename=SistemaBodega_Setup_v1.0.0
+OutputBaseFilename=SistemaBodega_Setup_v1.1.2
 SetupIconFile=assets\icono.ico
 Compression=lzma
 SolidCompression=yes

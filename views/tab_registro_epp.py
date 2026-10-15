@@ -64,33 +64,38 @@ class RegistroEppTab(ctk.CTkFrame):
 
         filtros = ctk.CTkFrame(frame_top, fg_color="transparent")
         filtros.grid(row=1, column=0, sticky="ew", padx=12, pady=(2, 4))
-        for columna in range(5):
+        for columna in range(3):
             filtros.grid_columnconfigure(columna, weight=1)
 
         self.entry_busqueda = self.crear_filtro_entrada(
             filtros,
             "Búsqueda general",
             f"Nombre, RUT, {self.NOMBRE_ELEMENTO}, proyecto o comentario",
-            0
+            0,
+            0,
         )
         self.entry_busqueda.bind("<KeyRelease>", self.aplicar_filtros)
 
         self.combo_trabajador = self.crear_filtro_combo(
             filtros,
             "Trabajador",
-            1
+            1,
+            0,
         )
         self.combo_epp = self.crear_filtro_combo(
-            filtros, self.NOMBRE_ELEMENTO, 2
+            filtros, self.NOMBRE_ELEMENTO, 2, 0
         )
         self.combo_proyecto = self.crear_filtro_combo(
             filtros,
             "Proyecto / destino",
-            3
+            0,
+            1,
         )
 
         frame_fechas = ctk.CTkFrame(filtros, fg_color="transparent")
-        frame_fechas.grid(row=0, column=4, sticky="ew", padx=5)
+        frame_fechas.grid(
+            row=1, column=1, columnspan=2, sticky="ew", padx=5, pady=(4, 0)
+        )
         frame_fechas.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkLabel(frame_fechas, text="Desde").grid(
@@ -117,35 +122,40 @@ class RegistroEppTab(ctk.CTkFrame):
         fila_acciones = ctk.CTkFrame(frame_top, fg_color="transparent")
         fila_acciones.grid(row=2, column=0, sticky="ew", padx=12, pady=(5, 10))
 
+        fila_botones = ctk.CTkFrame(fila_acciones, fg_color="transparent")
+        fila_botones.pack(fill="x")
+        fila_botones.grid_columnconfigure((0, 1, 2), weight=1)
+
         ctk.CTkButton(
-            fila_acciones,
+            fila_botones,
             text="Aplicar filtros",
             width=120,
             **estilos_boton("primario"),
             command=self.aplicar_filtros
-        ).pack(side="left", padx=(5, 5))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
         ctk.CTkButton(
-            fila_acciones,
+            fila_botones,
             text="Limpiar filtros",
             width=120,
             **estilos_boton("secundario"),
             command=self.limpiar_filtros
-        ).pack(side="left", padx=5)
+        ).grid(row=0, column=1, sticky="ew", padx=5)
 
         ctk.CTkButton(
-            fila_acciones,
+            fila_botones,
             text="Actualizar registro",
             width=135,
             **estilos_boton("fantasma"),
             command=self.iniciar_carga
-        ).pack(side="left", padx=5)
+        ).grid(row=0, column=2, sticky="ew", padx=(5, 0))
 
         ctk.CTkLabel(
             fila_acciones,
             text="Fechas en formato AAAA-MM-DD",
-            text_color=PALETA["texto_suave"]
-        ).pack(side="right", padx=8)
+            text_color=PALETA["texto_suave"],
+            anchor="e",
+        ).pack(fill="x", padx=4, pady=(6, 0))
 
         frame_resumen = ctk.CTkFrame(self, **estilos_panel())
         frame_resumen.grid(row=1, column=0, sticky="ew", padx=15, pady=(0, 10))
@@ -224,17 +234,19 @@ class RegistroEppTab(ctk.CTkFrame):
         barra_vertical.grid(row=0, column=1, sticky="ns", padx=(4, 8), pady=(10, 0))
         barra_horizontal.grid(row=1, column=0, sticky="ew", padx=(10, 0), pady=(4, 8))
 
-    def crear_filtro_entrada(self, parent, titulo, placeholder, columna):
+    def crear_filtro_entrada(
+        self, parent, titulo, placeholder, columna, fila=0
+    ):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.grid(row=0, column=columna, sticky="ew", padx=5)
+        frame.grid(row=fila, column=columna, sticky="ew", padx=5, pady=(0, 4))
         ctk.CTkLabel(frame, text=titulo).pack(anchor="w")
         entry = ctk.CTkEntry(frame, placeholder_text=placeholder)
         entry.pack(fill="x")
         return entry
 
-    def crear_filtro_combo(self, parent, titulo, columna):
+    def crear_filtro_combo(self, parent, titulo, columna, fila=0):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.grid(row=0, column=columna, sticky="ew", padx=5)
+        frame.grid(row=fila, column=columna, sticky="ew", padx=5, pady=(0, 4))
         ctk.CTkLabel(frame, text=titulo).pack(anchor="w")
         combo = ctk.CTkComboBox(
             frame,

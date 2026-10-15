@@ -2,6 +2,8 @@ import tkinter as tk
 import unicodedata
 from tkinter import TclError, ttk
 
+from utils.ui_theme import PALETA, color_actual
+
 
 class SearchableCombobox(ttk.Frame):
     """Entrada buscable con lista flotante que conserva el foco al escribir."""
@@ -154,7 +156,11 @@ class SearchableCombobox(ttk.Frame):
             yscrollcommand=self._scrollbar.set,
             font=self.entry.cget("font"),
             borderwidth=0,
-            highlightthickness=0
+            highlightthickness=0,
+            background=color_actual(PALETA["panel_alt"]),
+            foreground=color_actual(PALETA["texto"]),
+            selectbackground=color_actual(PALETA["seleccion"]),
+            selectforeground="white",
         )
         self._listbox.pack(side="left", fill="both", expand=True)
         self._scrollbar.configure(command=self._listbox.yview)

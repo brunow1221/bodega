@@ -2,35 +2,41 @@ import customtkinter as ctk
 
 
 PALETA = {
-    "fondo": "#edf5fb",
-    "panel": "#ffffff",
-    "panel_alt": "#f7fbff",
-    "borde": "#bfdbfe",
-    "borde_suave": "#1659af",
-    "texto": "#0f172a",
-    "texto_suave": "#64748b",
-    "primario": "#1d4ed8",
-    "primario_hover": "#1e40af",
-    "primario_suave": "#e0f2fe",
-    "secundario": "#475569",
-    "secundario_hover": "#334155",
-    "exito": "#0f766e",
-    "exito_hover": "#115e59",
-    "peligro": "#b91c1c",
-    "peligro_hover": "#7f1d1d",
-    "alerta": "#b7791f",
-    "alerta_hover": "#8a5a12",
-    "seleccion": "#2563eb",
-    "fila_par": "#f8fbff",
-    "fila_impar": "#ffffff",
-    "fila_inactiva": "#e5e7eb",
-    "stock_bajo": "#fef3c7",
-    "stock_critico": "#fee2e2",
+    "fondo": ("#edf5fb", "#0b1220"),
+    "panel": ("#ffffff", "#111827"),
+    "panel_alt": ("#f7fbff", "#172033"),
+    "borde": ("#bfdbfe", "#334155"),
+    "borde_suave": ("#1659af", "#475569"),
+    "texto": ("#0f172a", "#e5edf7"),
+    "texto_suave": ("#64748b", "#9fb0c4"),
+    "primario": ("#1d4ed8", "#3b82f6"),
+    "primario_hover": ("#1e40af", "#2563eb"),
+    "primario_suave": ("#e0f2fe", "#1e3a5f"),
+    "secundario": ("#475569", "#475569"),
+    "secundario_hover": ("#334155", "#64748b"),
+    "exito": ("#0f766e", "#0f766e"),
+    "exito_hover": ("#115e59", "#14b8a6"),
+    "peligro": ("#b91c1c", "#dc2626"),
+    "peligro_hover": ("#7f1d1d", "#b91c1c"),
+    "alerta": ("#b7791f", "#d97706"),
+    "alerta_hover": ("#8a5a12", "#b45309"),
+    "seleccion": ("#2563eb", "#1d4ed8"),
+    "fila_par": ("#f8fbff", "#172033"),
+    "fila_impar": ("#ffffff", "#111827"),
+    "fila_inactiva": ("#e5e7eb", "#293548"),
+    "stock_bajo": ("#fef3c7", "#4a3513"),
+    "stock_critico": ("#fee2e2", "#4b1d24"),
 }
 
 
-def aplicar_tema_base():
-    ctk.set_appearance_mode("Light")
+def color_actual(color):
+    if isinstance(color, (tuple, list)) and len(color) >= 2:
+        return color[1] if ctk.get_appearance_mode() == "Dark" else color[0]
+    return color
+
+
+def aplicar_tema_base(modo="Light"):
+    ctk.set_appearance_mode(modo)
     ctk.set_default_color_theme("blue")
 
 
@@ -94,38 +100,75 @@ def configurar_treeview_global(estilo, escala=1.0):
 
     estilo.theme_use("clam")
     estilo.configure(
+        "TFrame",
+        background=color_actual(PALETA["panel"]),
+    )
+    estilo.configure(
+        "TEntry",
+        fieldbackground=color_actual(PALETA["panel_alt"]),
+        foreground=color_actual(PALETA["texto"]),
+        bordercolor=color_actual(PALETA["borde"]),
+        lightcolor=color_actual(PALETA["borde"]),
+        darkcolor=color_actual(PALETA["borde"]),
+    )
+    estilo.configure(
+        "TButton",
+        background=color_actual(PALETA["primario_suave"]),
+        foreground=color_actual(PALETA["texto"]),
+        bordercolor=color_actual(PALETA["borde"]),
+    )
+    estilo.map(
+        "TButton",
+        background=[("active", color_actual(PALETA["borde"]))],
+    )
+    estilo.configure(
+        "TScrollbar",
+        background=color_actual(PALETA["borde"]),
+        troughcolor=color_actual(PALETA["panel_alt"]),
+        bordercolor=color_actual(PALETA["panel"]),
+        arrowcolor=color_actual(PALETA["texto"]),
+    )
+    estilo.configure(
         "Treeview",
-        background=PALETA["fila_impar"],
-        foreground=PALETA["texto"],
+        background=color_actual(PALETA["fila_impar"]),
+        foreground=color_actual(PALETA["texto"]),
         rowheight=alto_fila,
-        fieldbackground=PALETA["fila_impar"],
-        bordercolor=PALETA["borde_suave"],
+        fieldbackground=color_actual(PALETA["fila_impar"]),
+        bordercolor=color_actual(PALETA["borde_suave"]),
+        lightcolor=color_actual(PALETA["borde_suave"]),
+        darkcolor=color_actual(PALETA["borde_suave"]),
         borderwidth=1,
+        relief="flat",
         font=("Segoe UI", tamano_fuente),
     )
     estilo.configure(
         "Treeview.Heading",
         font=("Segoe UI", tamano_fuente, "bold"),
-        background=PALETA["primario_suave"],
-        foreground=PALETA["texto"],
+        background=color_actual(PALETA["primario_suave"]),
+        foreground=color_actual(PALETA["texto"]),
         relief="flat",
-        bordercolor=PALETA["borde"],
+        bordercolor=color_actual(PALETA["borde"]),
+        lightcolor=color_actual(PALETA["borde"]),
+        darkcolor=color_actual(PALETA["borde"]),
     )
     estilo.map(
         "Treeview",
-        background=[("selected", PALETA["seleccion"])],
+        background=[("selected", color_actual(PALETA["seleccion"]))],
         foreground=[("selected", "white")],
+        bordercolor=[("focus", color_actual(PALETA["borde_suave"]))],
+        lightcolor=[("focus", color_actual(PALETA["borde_suave"]))],
+        darkcolor=[("focus", color_actual(PALETA["borde_suave"]))],
     )
 
 
 def estilizar_treeview(tabla):
-    tabla.tag_configure("par", background=PALETA["fila_par"])
-    tabla.tag_configure("impar", background=PALETA["fila_impar"])
-    tabla.tag_configure("activo", background=PALETA["fila_impar"])
-    tabla.tag_configure("inactivo", background=PALETA["fila_inactiva"], foreground=PALETA["texto_suave"])
-    tabla.tag_configure("finalizado", background=PALETA["primario_suave"], foreground=PALETA["texto"])
-    tabla.tag_configure("stock_bajo", background=PALETA["stock_bajo"], foreground=PALETA["texto"])
-    tabla.tag_configure("stock_critico", background=PALETA["stock_critico"], foreground=PALETA["peligro"])
+    tabla.tag_configure("par", background=color_actual(PALETA["fila_par"]))
+    tabla.tag_configure("impar", background=color_actual(PALETA["fila_impar"]))
+    tabla.tag_configure("activo", background=color_actual(PALETA["fila_impar"]))
+    tabla.tag_configure("inactivo", background=color_actual(PALETA["fila_inactiva"]), foreground=color_actual(PALETA["texto_suave"]))
+    tabla.tag_configure("finalizado", background=color_actual(PALETA["primario_suave"]), foreground=color_actual(PALETA["texto"]))
+    tabla.tag_configure("stock_bajo", background=color_actual(PALETA["stock_bajo"]), foreground=color_actual(PALETA["texto"]))
+    tabla.tag_configure("stock_critico", background=color_actual(PALETA["stock_critico"]), foreground=color_actual(PALETA["peligro"]))
 
 
 def color_estado(tipo):

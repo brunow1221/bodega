@@ -47,29 +47,36 @@ class TrabajadoresTab(ctk.CTkFrame):
         self.crear_interfaz()
 
     def crear_interfaz(self):
-        frame_top = ctk.CTkFrame(self, **estilos_barra())
-        frame_top.pack(fill="x", pady=10, padx=10)
+        self.frame_top = ctk.CTkFrame(self, **estilos_barra())
+        self.frame_top.pack(fill="x", pady=10, padx=10)
+        fila_acciones = ctk.CTkFrame(self.frame_top, fg_color="transparent")
+        fila_acciones.pack(fill="x", padx=12, pady=10)
+        fila_acciones.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkButton(
-            frame_top,
+        self.btn_refrescar = ctk.CTkButton(
+            fila_acciones,
             text="Refrescar Lista",
             **estilos_boton("primario"),
             command=self.iniciar_carga_hilo
-        ).pack(side="left")
+        )
+        self.btn_refrescar.grid(row=0, column=0, sticky="w")
 
         self.label_estado = ctk.CTkLabel(
-            frame_top,
+            fila_acciones,
             text="",
-            text_color=color_estado("info")
+            text_color=color_estado("info"),
+            anchor="w",
+            justify="left",
         )
-        self.label_estado.pack(side="left", padx=10)
+        self.label_estado.grid(row=0, column=1, sticky="ew", padx=10)
 
-        ctk.CTkButton(
-            frame_top,
+        self.btn_nuevo_trabajador = ctk.CTkButton(
+            fila_acciones,
             text="+ Nuevo Trabajador",
             **estilos_boton("primario"),
             command=self.abrir_formulario_trabajador
-        ).pack(side="right")
+        )
+        self.btn_nuevo_trabajador.grid(row=0, column=2, sticky="e")
 
         frame_tabla = ctk.CTkFrame(self, **estilos_panel())
         frame_tabla.pack(fill="both", expand=True, padx=10, pady=10)

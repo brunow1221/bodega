@@ -40,6 +40,16 @@ def dimensiones_ajustadas(ancho, alto, escala, area_ancho, area_alto):
     return min(ancho, max_ancho), min(alto, max_alto)
 
 
+def dimensiones_ventana_principal(area_ancho, area_alto, escala=1.0):
+    ancho, alto = dimensiones_ajustadas(
+        1200, 800, escala, area_ancho, area_alto
+    )
+    minimo_ancho, minimo_alto = dimensiones_ajustadas(
+        900, 600, escala, area_ancho, area_alto
+    )
+    return ancho, alto, minimo_ancho, minimo_alto
+
+
 def adaptar_campos_en_fila(frame, cantidad, pie=None):
     """Apila pares etiqueta/campo cuando el formulario tiene poco ancho."""
     grupos = [(frame.grid_slaves(row=0, column=i)[0],

@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +14,42 @@ from utils.importador_precios import (
 
 
 class ImportadorPreciosTests(unittest.TestCase):
+    def test_importa_aunque_haya_un_numpy_incompleto(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            paquete_numpy = Path(temporal) / "numpy"
+            paquete_numpy.mkdir()
+            (paquete_numpy / "__init__.py").write_text(
+                "__version__ = 'incompleto'\n",
+                encoding="utf-8",
+            )
+            entorno = os.environ.copy()
+            raiz_proyecto = str(Path(__file__).resolve().parents[1])
+            entorno["PYTHONPATH"] = os.pathsep.join([
+                temporal,
+                raiz_proyecto,
+            ])
+
+            resultado = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import utils.importador_precios; print('IMPORT_OK')",
+                ],
+                cwd=raiz_proyecto,
+                env=entorno,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+
+        self.assertEqual(
+            resultado.returncode,
+            0,
+            msg=resultado.stderr,
+        )
+        self.assertIn("IMPORT_OK", resultado.stdout)
+
     def crear_excel(self, filas):
         temporal = tempfile.TemporaryDirectory()
         ruta = Path(temporal.name) / "precios.xlsx"

@@ -47,8 +47,13 @@ class MapaBodegaTab(ctk.CTkFrame):
         fila_titulo = ctk.CTkFrame(frame_top, fg_color="transparent")
         fila_titulo.pack(fill="x", padx=12, pady=(10, 4))
 
-        fila_controles = ctk.CTkFrame(frame_top, fg_color="transparent")
-        fila_controles.pack(fill="x", padx=12, pady=(4, 10))
+        fila_selectores = ctk.CTkFrame(frame_top, fg_color="transparent")
+        fila_selectores.pack(fill="x", padx=12, pady=4)
+        fila_selectores.grid_columnconfigure((0, 1), weight=1)
+
+        fila_acciones = ctk.CTkFrame(frame_top, fg_color="transparent")
+        fila_acciones.pack(fill="x", padx=12, pady=(4, 10))
+        fila_acciones.grid_columnconfigure(2, weight=1)
 
         ctk.CTkLabel(
             fila_titulo,
@@ -57,51 +62,55 @@ class MapaBodegaTab(ctk.CTkFrame):
             text_color=PALETA["primario"]
         ).pack(side="left", padx=(0, 20))
 
-        ctk.CTkLabel(fila_controles, text="Bodega:").pack(side="left", padx=(5, 5))
+        campo_bodega = ctk.CTkFrame(fila_selectores, fg_color="transparent")
+        campo_bodega.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkLabel(campo_bodega, text="Bodega:").pack(anchor="w")
 
         self.combo_bodega = ctk.CTkComboBox(
-            fila_controles,
+            campo_bodega,
             values=[],
-            width=180,
             state="readonly",
             command=self.al_cambiar_bodega
         )
-        self.combo_bodega.pack(side="left", padx=5)
+        self.combo_bodega.pack(fill="x")
 
-        ctk.CTkLabel(fila_controles, text="Sector:").pack(side="left", padx=(15, 5))
+        campo_sector = ctk.CTkFrame(fila_selectores, fg_color="transparent")
+        campo_sector.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ctk.CTkLabel(campo_sector, text="Sector:").pack(anchor="w")
 
         self.combo_rack = ctk.CTkComboBox(
-            fila_controles,
+            campo_sector,
             values=[],
-            width=220,
             state="readonly",
             command=self.al_cambiar_rack
         )
-        self.combo_rack.pack(side="left", padx=5)
+        self.combo_rack.pack(fill="x")
 
         ctk.CTkButton(
-            fila_controles,
+            fila_acciones,
             text="Actualizar",
-            width=100,
             **estilos_boton("primario"),
             command=self.cargar_mapa_actual
-        ).pack(side="left", padx=15)
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
 
         self.btn_administrar_racks = ctk.CTkButton(
-            fila_controles,
+            fila_acciones,
             text="Administrar sectores",
-            width=135,
             **estilos_boton("fantasma"),
             command=self.abrir_gestor_racks
         )
-        self.btn_administrar_racks.pack(side="left", padx=(0, 10))
+        self.btn_administrar_racks.grid(
+            row=0, column=1, sticky="w", padx=(6, 10)
+        )
 
         self.label_estado = ctk.CTkLabel(
-            fila_titulo,
+            fila_acciones,
             text="",
-            text_color=color_estado("suave")
+            text_color=color_estado("suave"),
+            anchor="e",
+            justify="right",
         )
-        self.label_estado.pack(side="right", padx=10)
+        self.label_estado.grid(row=0, column=2, sticky="ew", padx=(8, 0))
 
         # =========================
         # CONTENEDOR PRINCIPAL

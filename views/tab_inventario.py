@@ -136,11 +136,24 @@ class InventarioTab(ctk.CTkFrame):
         fila_filtros = ctk.CTkFrame(frame_top, fg_color="transparent")
         fila_filtros.pack(fill="x", padx=12, pady=(10, 4))
 
+        fila_busqueda = ctk.CTkFrame(fila_filtros, fg_color="transparent")
+        fila_busqueda.pack(fill="x")
+
+        fila_actualizacion = ctk.CTkFrame(fila_filtros, fg_color="transparent")
+        fila_actualizacion.pack(fill="x", pady=(6, 0))
+        fila_actualizacion.grid_columnconfigure(1, weight=1)
+
         fila_acciones = ctk.CTkFrame(frame_top, fg_color="transparent")
         fila_acciones.pack(fill="x", padx=12, pady=(4, 10))
 
+        fila_archivos = ctk.CTkFrame(fila_acciones, fg_color="transparent")
+        fila_archivos.pack(fill="x")
+
+        fila_gestion = ctk.CTkFrame(fila_acciones, fg_color="transparent")
+        fila_gestion.pack(fill="x", pady=(6, 0))
+
         self.entry_busqueda = ctk.CTkEntry(
-            fila_filtros,
+            fila_busqueda,
             placeholder_text=(
                 f"🔍 Buscar insumo de {self.obtener_nombre_inventario().lower()}..."
                 if self.obtener_nombre_inventario() else
@@ -148,11 +161,11 @@ class InventarioTab(ctk.CTkFrame):
             ),
             width=280
         )
-        self.entry_busqueda.pack(side="left", padx=5)
+        self.entry_busqueda.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.entry_busqueda.bind("<Return>", lambda e: self.iniciar_carga_hilo())
 
         ctk.CTkButton(
-            fila_filtros,
+            fila_busqueda,
             text="Buscar",
             width=70,
             **estilos_boton("primario"),
@@ -160,35 +173,38 @@ class InventarioTab(ctk.CTkFrame):
         ).pack(side="left", padx=5)
 
         ctk.CTkButton(
-            fila_filtros,
+            fila_busqueda,
             text="Limpiar",
             width=70,
             **estilos_boton("secundario"),
             command=self.limpiar_filtros
         ).pack(side="left", padx=5)
 
-        ctk.CTkButton(
-            fila_filtros,
+        self.btn_actualizar_lista = ctk.CTkButton(
+            fila_actualizacion,
             text="Actualizar Lista",
             **estilos_boton("primario"),
             command=self.iniciar_carga_hilo
-        ).pack(side="left", padx=5)
+        )
+        self.btn_actualizar_lista.grid(row=0, column=0, sticky="w")
 
         self.label_estado = ctk.CTkLabel(
-            fila_filtros,
+            fila_actualizacion,
             text="",
-            text_color=color_estado("info")
+            text_color=color_estado("info"),
+            anchor="w",
+            justify="left",
         )
-        self.label_estado.pack(side="left", padx=10)
+        self.label_estado.grid(row=0, column=1, sticky="ew", padx=10)
 
         self.btn_excel = ctk.CTkButton(
-            fila_acciones,
+            fila_archivos,
             text="Exportar a Excel",
             **estilos_boton("exito"),
             width=140,
             command=self.exportar_a_excel
         )
-        self.btn_excel.pack(side="right", padx=5)
+        self.btn_excel.pack(side="left", fill="x", expand=True, padx=5)
 
         self.btn_importar_precios = None
         if not any((
@@ -197,38 +213,40 @@ class InventarioTab(ctk.CTkFrame):
             self.solo_libreria,
         )):
             self.btn_importar_precios = ctk.CTkButton(
-                fila_acciones,
+                fila_archivos,
                 text="Importar precios Excel",
                 **estilos_boton("secundario"),
                 width=150,
                 command=self.seleccionar_excel_precios,
             )
-            self.btn_importar_precios.pack(side="left", padx=5)
+            self.btn_importar_precios.pack(
+                side="left", fill="x", expand=True, padx=5
+            )
 
         self.btn_editar = ctk.CTkButton(
-            fila_acciones,
+            fila_gestion,
             text="Editar Seleccionado",
             **estilos_boton("primario"),
             width=140,
             command=self.abrir_formulario_edicion
         )
-        self.btn_editar.pack(side="right", padx=5)
+        self.btn_editar.pack(side="left", fill="x", expand=True, padx=5)
 
         self.btn_nuevo = ctk.CTkButton(
-            fila_acciones,
+            fila_gestion,
             text="+ Nuevo Producto",
             **estilos_boton("primario"),
             command=self.abrir_formulario_producto
         )
-        self.btn_nuevo.pack(side="right", padx=(5, 0))
+        self.btn_nuevo.pack(side="left", fill="x", expand=True, padx=5)
 
         self.btn_restaurar = ctk.CTkButton(
-            fila_acciones,
+            fila_gestion,
             text="Restaurar",
             **estilos_boton("alerta"),
             command=self.restaurar_producto
         )
-        self.btn_restaurar.pack(side="right", padx=5)
+        self.btn_restaurar.pack(side="left", fill="x", expand=True, padx=5)
 
         # =========================
         # TABLA

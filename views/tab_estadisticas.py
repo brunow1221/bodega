@@ -16,6 +16,7 @@ from utils.searchable_combobox import SearchableCombobox
 from utils.ui_dispatcher import ejecutar_en_ui, iniciar_despachador_ui
 from utils.ui_theme import (
     PALETA,
+    color_actual,
     color_estado,
     estilos_barra,
     estilos_boton,
@@ -40,7 +41,7 @@ class GraficoBarras(ctk.CTkFrame):
         self.canvas = tk.Canvas(
             self,
             height=280,
-            background=PALETA["panel"],
+            background=color_actual(PALETA["panel"]),
             highlightthickness=0,
         )
         self.canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -56,6 +57,10 @@ class GraficoBarras(ctk.CTkFrame):
         self.escala = escala
         self.actualizar(self.datos)
 
+    def aplicar_tema(self):
+        self.canvas.configure(background=color_actual(PALETA["panel"]))
+        self.redibujar()
+
     def redibujar(self):
         self.canvas.delete("all")
         ancho = max(self.canvas.winfo_width(), 420)
@@ -66,7 +71,7 @@ class GraficoBarras(ctk.CTkFrame):
                 ancho / 2,
                 alto / 2,
                 text="Sin datos para los filtros seleccionados",
-                fill=PALETA["texto_suave"],
+                fill=color_actual(PALETA["texto_suave"]),
                 font=("Segoe UI", max(9, round(11 * escala))),
             )
             return
@@ -91,7 +96,7 @@ class GraficoBarras(ctk.CTkFrame):
                 centro_y,
                 text=etiqueta,
                 anchor="e",
-                fill=PALETA["texto"],
+                fill=color_actual(PALETA["texto"]),
                 font=("Segoe UI", max(8, round(10 * escala))),
             )
             self.canvas.create_rectangle(
@@ -99,7 +104,7 @@ class GraficoBarras(ctk.CTkFrame):
                 centro_y - alto_barra / 2,
                 margen_etiqueta + ancho_barra,
                 centro_y + alto_barra / 2,
-                fill=self.color,
+                fill=color_actual(self.color),
                 outline="",
             )
             self.canvas.create_text(
@@ -107,7 +112,7 @@ class GraficoBarras(ctk.CTkFrame):
                 centro_y,
                 text=str(item["cantidad"]),
                 anchor="w",
-                fill=PALETA["texto"],
+                fill=color_actual(PALETA["texto"]),
                 font=("Segoe UI", max(8, round(10 * escala)), "bold"),
             )
 
@@ -126,7 +131,7 @@ class GraficoTendencia(ctk.CTkFrame):
         self.canvas = tk.Canvas(
             self,
             height=260,
-            background=PALETA["panel"],
+            background=color_actual(PALETA["panel"]),
             highlightthickness=0,
         )
         self.canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -141,6 +146,10 @@ class GraficoTendencia(ctk.CTkFrame):
         self.escala = escala
         self.actualizar(self.datos)
 
+    def aplicar_tema(self):
+        self.canvas.configure(background=color_actual(PALETA["panel"]))
+        self.redibujar()
+
     def redibujar(self):
         self.canvas.delete("all")
         ancho = max(self.canvas.winfo_width(), 500)
@@ -151,7 +160,7 @@ class GraficoTendencia(ctk.CTkFrame):
                 ancho / 2,
                 alto / 2,
                 text="Sin fechas válidas para construir la tendencia",
-                fill=PALETA["texto_suave"],
+                fill=color_actual(PALETA["texto_suave"]),
                 font=("Segoe UI", max(9, round(11 * escala))),
             )
             return
@@ -167,10 +176,12 @@ class GraficoTendencia(ctk.CTkFrame):
         for paso in range(5):
             y = y0 - (y0 - y1) * paso / 4
             valor = round(maximo * paso / 4)
-            self.canvas.create_line(x0, y, x1, y, fill=PALETA["borde"])
+            self.canvas.create_line(
+                x0, y, x1, y, fill=color_actual(PALETA["borde"])
+            )
             self.canvas.create_text(
                 x0 - 8, y, text=str(valor), anchor="e",
-                fill=PALETA["texto_suave"],
+                fill=color_actual(PALETA["texto_suave"]),
                 font=("Segoe UI", max(8, round(9 * escala))),
             )
 
@@ -186,25 +197,29 @@ class GraficoTendencia(ctk.CTkFrame):
             puntos.extend((x, y))
             self.canvas.create_text(
                 x, y0 + round(20 * escala), text=item["etiqueta"],
-                anchor="n", fill=PALETA["texto_suave"],
+                anchor="n", fill=color_actual(PALETA["texto_suave"]),
                 font=("Segoe UI", max(7, round(9 * escala))),
             )
             self.canvas.create_text(
                 x, y - round(11 * escala), text=str(item["cantidad"]),
-                fill=PALETA["texto"],
+                fill=color_actual(PALETA["texto"]),
                 font=("Segoe UI", max(8, round(9 * escala)), "bold"),
             )
 
         if len(puntos) >= 4:
             self.canvas.create_line(
-                *puntos, fill=PALETA["primario"], width=max(2, round(3 * escala))
+                *puntos,
+                fill=color_actual(PALETA["primario"]),
+                width=max(2, round(3 * escala)),
             )
         for indice in range(0, len(puntos), 2):
             x, y = puntos[indice], puntos[indice + 1]
             radio = max(3, round(4 * escala))
             self.canvas.create_oval(
                 x - radio, y - radio, x + radio, y + radio,
-                fill=PALETA["primario"], outline=PALETA["panel"], width=2,
+                fill=color_actual(PALETA["primario"]),
+                outline=color_actual(PALETA["panel"]),
+                width=2,
             )
 
 
@@ -228,24 +243,45 @@ class EstadisticasTab(ctk.CTkFrame):
         self.pack_propagate(False)
         barra = ctk.CTkFrame(self, **estilos_barra())
         barra.pack(fill="x", padx=12, pady=(10, 5))
+        barra.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(
+        self.titulo_estadisticas = ctk.CTkLabel(
             barra,
             text="Estadísticas de artículos y proyectos",
             font=ctk.CTkFont(size=20, weight="bold"),
             text_color=PALETA["primario"],
-        ).pack(side="left", padx=14, pady=12)
-        self.label_estado = ctk.CTkLabel(
-            barra, text="", text_color=color_estado("suave")
+            anchor="w",
+            justify="left",
         )
-        self.label_estado.pack(side="right", padx=(8, 14))
+        self.titulo_estadisticas.grid(
+            row=0, column=0, sticky="ew", padx=14, pady=(10, 4)
+        )
+        fila_actualizacion = ctk.CTkFrame(barra, fg_color="transparent")
+        fila_actualizacion.grid(
+            row=1, column=0, sticky="ew", padx=14, pady=(4, 10)
+        )
+        fila_actualizacion.grid_columnconfigure(0, weight=1)
+        self.label_estado = ctk.CTkLabel(
+            fila_actualizacion,
+            text="",
+            text_color=color_estado("suave"),
+            anchor="w",
+            justify="left",
+        )
+        self.label_estado.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.boton_actualizar = ctk.CTkButton(
-            barra,
+            fila_actualizacion,
             text="Actualizar datos",
             command=self.actualizar_datos,
             **estilos_boton("primario"),
         )
-        self.boton_actualizar.pack(side="right", padx=8, pady=8)
+        self.boton_actualizar.grid(row=0, column=1, sticky="e")
+        barra.bind(
+            "<Configure>",
+            lambda evento: self.titulo_estadisticas.configure(
+                wraplength=max(220, evento.width - 36)
+            ),
+        )
 
         self.secciones = ctk.CTkTabview(
             self,
@@ -270,7 +306,7 @@ class EstadisticasTab(ctk.CTkFrame):
 
         filtros = ctk.CTkFrame(self.contenido, **estilos_panel())
         filtros.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=5)
-        for columna in range(6):
+        for columna in range(3):
             filtros.grid_columnconfigure(columna, weight=1)
 
         self.combo_proyecto = self.crear_filtro_combo(
@@ -279,43 +315,43 @@ class EstadisticasTab(ctk.CTkFrame):
         self.combo_tipo = self.crear_filtro_combo(
             filtros, "Tipo de uso", [TODOS, *TIPOS_USO], 1
         )
-
-        ctk.CTkLabel(filtros, text="Desde").grid(
-            row=0, column=2, sticky="w", padx=8, pady=(8, 2)
-        )
-        self.entry_desde = ctk.CTkEntry(filtros, placeholder_text="AAAA-MM-DD")
-        self.entry_desde.grid(row=1, column=2, sticky="ew", padx=8, pady=(0, 10))
-        ctk.CTkLabel(filtros, text="Hasta").grid(
-            row=0, column=3, sticky="w", padx=8, pady=(8, 2)
-        )
-        self.entry_hasta = ctk.CTkEntry(filtros, placeholder_text="AAAA-MM-DD")
-        self.entry_hasta.grid(row=1, column=3, sticky="ew", padx=8, pady=(0, 10))
-        for entrada in (self.entry_desde, self.entry_hasta):
-            entrada.bind("<Return>", self.aplicar_filtros)
-
         self.combo_limite = self.crear_filtro_combo(
-            filtros, "Mostrar", ["5", "10", "15", "20"], 4
+            filtros, "Mostrar", ["5", "10", "15", "20"], 2
         )
         self.combo_limite.set("10")
 
+        ctk.CTkLabel(filtros, text="Desde").grid(
+            row=2, column=0, sticky="w", padx=8, pady=(2, 2)
+        )
+        self.entry_desde = ctk.CTkEntry(filtros, placeholder_text="AAAA-MM-DD")
+        self.entry_desde.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 10))
+        ctk.CTkLabel(filtros, text="Hasta").grid(
+            row=2, column=1, sticky="w", padx=8, pady=(2, 2)
+        )
+        self.entry_hasta = ctk.CTkEntry(filtros, placeholder_text="AAAA-MM-DD")
+        self.entry_hasta.grid(row=3, column=1, sticky="ew", padx=8, pady=(0, 10))
+        for entrada in (self.entry_desde, self.entry_hasta):
+            entrada.bind("<Return>", self.aplicar_filtros)
+
         acciones = ctk.CTkFrame(filtros, fg_color="transparent")
-        acciones.grid(row=1, column=5, sticky="ew", padx=8, pady=(0, 10))
+        acciones.grid(row=3, column=2, sticky="ew", padx=8, pady=(0, 10))
+        acciones.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(
-            acciones, text="Aplicar", width=82,
+            acciones, text="Aplicar",
             command=self.aplicar_filtros, **estilos_boton("exito")
-        ).pack(side="left", padx=(0, 4))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ctk.CTkButton(
-            acciones, text="Limpiar", width=82,
+            acciones, text="Limpiar",
             command=self.limpiar_filtros, **estilos_boton("fantasma")
-        ).pack(side="left", padx=4)
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
         tarjetas = ctk.CTkFrame(self.contenido, fg_color="transparent")
         tarjetas.grid(row=1, column=0, columnspan=2, sticky="ew", padx=4, pady=3)
-        tarjetas.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="tarjetas")
-        self.card_cantidad = self.crear_tarjeta(tarjetas, "Unidades utilizadas", 0)
-        self.card_productos = self.crear_tarjeta(tarjetas, "Artículos distintos", 1)
-        self.card_proyectos = self.crear_tarjeta(tarjetas, "Proyectos involucrados", 2)
-        self.card_valor = self.crear_tarjeta(tarjetas, "Valor estimado", 3)
+        tarjetas.grid_columnconfigure((0, 1), weight=1, uniform="tarjetas")
+        self.card_cantidad = self.crear_tarjeta(tarjetas, "Unidades utilizadas", 0, 0)
+        self.card_productos = self.crear_tarjeta(tarjetas, "Artículos distintos", 1, 0)
+        self.card_proyectos = self.crear_tarjeta(tarjetas, "Proyectos involucrados", 0, 1)
+        self.card_valor = self.crear_tarjeta(tarjetas, "Valor estimado", 1, 1)
 
         self.grafico_productos = GraficoBarras(
             self.contenido, "Artículos más utilizados", PALETA["primario"]
@@ -344,8 +380,7 @@ class EstadisticasTab(ctk.CTkFrame):
     def crear_historial_articulo(self):
         filtros = ctk.CTkFrame(self.tab_historial_articulo, **estilos_panel())
         filtros.pack(fill="x", padx=10, pady=10)
-        filtros.grid_columnconfigure(0, weight=2)
-        filtros.grid_columnconfigure((1, 2, 3, 4), weight=1)
+        filtros.grid_columnconfigure((0, 1, 2), weight=1)
 
         ctk.CTkLabel(filtros, text="Artículo").grid(
             row=0, column=0, sticky="w", padx=8, pady=(8, 2)
@@ -369,63 +404,68 @@ class EstadisticasTab(ctk.CTkFrame):
         )
 
         ctk.CTkLabel(filtros, text="Desde").grid(
-            row=0, column=3, sticky="w", padx=8, pady=(8, 2)
+            row=2, column=0, sticky="w", padx=8, pady=(2, 2)
         )
         self.entry_desde_historial = ctk.CTkEntry(
             filtros, placeholder_text="AAAA-MM-DD"
         )
         self.entry_desde_historial.grid(
-            row=1, column=3, sticky="ew", padx=8, pady=(0, 10)
+            row=3, column=0, sticky="ew", padx=8, pady=(0, 10)
         )
         ctk.CTkLabel(filtros, text="Hasta").grid(
-            row=0, column=4, sticky="w", padx=8, pady=(8, 2)
+            row=2, column=1, sticky="w", padx=8, pady=(2, 2)
         )
         self.entry_hasta_historial = ctk.CTkEntry(
             filtros, placeholder_text="AAAA-MM-DD"
         )
         self.entry_hasta_historial.grid(
-            row=1, column=4, sticky="ew", padx=8, pady=(0, 10)
+            row=3, column=1, sticky="ew", padx=8, pady=(0, 10)
         )
         for entrada in (self.entry_desde_historial, self.entry_hasta_historial):
             entrada.bind("<Return>", self.aplicar_filtros_historial)
 
         acciones = ctk.CTkFrame(filtros, fg_color="transparent")
-        acciones.grid(row=2, column=0, columnspan=5, sticky="ew", padx=8, pady=(0, 8))
+        acciones.grid(row=3, column=2, sticky="ew", padx=8, pady=(0, 10))
+        acciones.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(
             acciones,
             text="Aplicar filtros",
             command=self.aplicar_filtros_historial,
             **estilos_boton("exito"),
-        ).pack(side="left", padx=(0, 6))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ctk.CTkButton(
             acciones,
             text="Limpiar filtros",
             command=self.limpiar_filtros_historial,
             **estilos_boton("fantasma"),
-        ).pack(side="left", padx=6)
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self.label_estado_historial = ctk.CTkLabel(
-            acciones,
+            filtros,
             text="Seleccione un artículo para revisar sus movimientos.",
             text_color=color_estado("suave"),
+            anchor="w",
+            justify="left",
         )
-        self.label_estado_historial.pack(side="right", padx=6)
+        self.label_estado_historial.grid(
+            row=4, column=0, columnspan=3, sticky="ew", padx=8, pady=(0, 8)
+        )
 
         tarjetas = ctk.CTkFrame(
             self.tab_historial_articulo, fg_color="transparent"
         )
         tarjetas.pack(fill="x", padx=6, pady=(0, 5))
-        tarjetas.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="historial")
+        tarjetas.grid_columnconfigure((0, 1), weight=1, uniform="historial")
         self.card_movimientos_articulo = self.crear_tarjeta(
-            tarjetas, "Movimientos", 0
+            tarjetas, "Movimientos", 0, 0
         )
         self.card_retirado_articulo = self.crear_tarjeta(
-            tarjetas, "Cantidad retirada", 1
+            tarjetas, "Cantidad retirada", 1, 0
         )
         self.card_devuelto_articulo = self.crear_tarjeta(
-            tarjetas, "Cantidad devuelta/ingresada", 2
+            tarjetas, "Cantidad devuelta/ingresada", 0, 1
         )
         self.card_saldo_articulo = self.crear_tarjeta(
-            tarjetas, "Balance de movimientos", 3
+            tarjetas, "Balance de movimientos", 1, 1
         )
 
         frame_tabla = ctk.CTkFrame(
@@ -492,8 +532,7 @@ class EstadisticasTab(ctk.CTkFrame):
     def crear_historial_precios(self):
         filtros = ctk.CTkFrame(self.tab_precios, **estilos_panel())
         filtros.pack(fill="x", padx=10, pady=10)
-        filtros.grid_columnconfigure(0, weight=2)
-        filtros.grid_columnconfigure((1, 2, 3), weight=1)
+        filtros.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkLabel(filtros, text="Artículo").grid(
             row=0, column=0, sticky="w", padx=8, pady=(8, 2)
@@ -512,48 +551,55 @@ class EstadisticasTab(ctk.CTkFrame):
             filtros, "Tipo de cambio", [TODOS, "Aumentos", "Disminuciones"], 1
         )
         ctk.CTkLabel(filtros, text="Desde").grid(
-            row=0, column=2, sticky="w", padx=8, pady=(8, 2)
+            row=2, column=0, sticky="w", padx=8, pady=(2, 2)
         )
         self.entry_desde_precio = ctk.CTkEntry(
             filtros, placeholder_text="AAAA-MM-DD"
         )
         self.entry_desde_precio.grid(
-            row=1, column=2, sticky="ew", padx=8, pady=(0, 10)
+            row=3, column=0, sticky="ew", padx=8, pady=(0, 10)
         )
         ctk.CTkLabel(filtros, text="Hasta").grid(
-            row=0, column=3, sticky="w", padx=8, pady=(8, 2)
+            row=2, column=1, sticky="w", padx=8, pady=(2, 2)
         )
         self.entry_hasta_precio = ctk.CTkEntry(
             filtros, placeholder_text="AAAA-MM-DD"
         )
         self.entry_hasta_precio.grid(
-            row=1, column=3, sticky="ew", padx=8, pady=(0, 10)
+            row=3, column=1, sticky="ew", padx=8, pady=(0, 10)
         )
         for entrada in (self.entry_desde_precio, self.entry_hasta_precio):
             entrada.bind("<Return>", self.aplicar_filtros_precios)
 
         acciones = ctk.CTkFrame(filtros, fg_color="transparent")
-        acciones.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 8))
+        acciones.grid(row=4, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 4))
+        acciones.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(
             acciones, text="Aplicar filtros", command=self.aplicar_filtros_precios,
             **estilos_boton("exito")
-        ).pack(side="left", padx=(0, 6))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ctk.CTkButton(
             acciones, text="Limpiar filtros", command=self.limpiar_filtros_precios,
             **estilos_boton("fantasma")
-        ).pack(side="left", padx=6)
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self.label_estado_precios = ctk.CTkLabel(
-            acciones, text="Cargando historial...", text_color=color_estado("suave")
+            filtros,
+            text="Cargando historial...",
+            text_color=color_estado("suave"),
+            anchor="w",
+            justify="left",
         )
-        self.label_estado_precios.pack(side="right", padx=6)
+        self.label_estado_precios.grid(
+            row=5, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 8)
+        )
 
         tarjetas = ctk.CTkFrame(self.tab_precios, fg_color="transparent")
         tarjetas.pack(fill="x", padx=6, pady=(0, 5))
-        tarjetas.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="precios")
-        self.card_productos_precio = self.crear_tarjeta(tarjetas, "Artículos modificados", 0)
-        self.card_cambios_precio = self.crear_tarjeta(tarjetas, "Cambios registrados", 1)
-        self.card_aumentos_precio = self.crear_tarjeta(tarjetas, "Aumentos", 2)
-        self.card_disminuciones_precio = self.crear_tarjeta(tarjetas, "Disminuciones", 3)
+        tarjetas.grid_columnconfigure((0, 1), weight=1, uniform="precios")
+        self.card_productos_precio = self.crear_tarjeta(tarjetas, "Artículos modificados", 0, 0)
+        self.card_cambios_precio = self.crear_tarjeta(tarjetas, "Cambios registrados", 1, 0)
+        self.card_aumentos_precio = self.crear_tarjeta(tarjetas, "Aumentos", 0, 1)
+        self.card_disminuciones_precio = self.crear_tarjeta(tarjetas, "Disminuciones", 1, 1)
 
         frame_tabla = ctk.CTkFrame(self.tab_precios, **estilos_panel())
         frame_tabla.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -581,9 +627,13 @@ class EstadisticasTab(ctk.CTkFrame):
                 anchor="w" if columna in {"Artículo", "Modificado por"} else "center",
             )
         estilizar_treeview(self.tabla_precios)
-        self.tabla_precios.tag_configure("aumento", background=PALETA["stock_bajo"])
         self.tabla_precios.tag_configure(
-            "disminucion", background=PALETA["stock_critico"], foreground=PALETA["peligro"]
+            "aumento", background=color_actual(PALETA["stock_bajo"])
+        )
+        self.tabla_precios.tag_configure(
+            "disminucion",
+            background=color_actual(PALETA["stock_critico"]),
+            foreground=color_actual(PALETA["peligro"]),
         )
         self.tabla_precios.pack(fill="both", expand=True)
         scroll_y.configure(command=self.tabla_precios.yview)
@@ -615,15 +665,23 @@ class EstadisticasTab(ctk.CTkFrame):
         combo.set(valores[0])
         return combo
 
-    def crear_tarjeta(self, padre, titulo, columna):
+    def crear_tarjeta(self, padre, titulo, columna, fila=0):
         tarjeta = ctk.CTkFrame(padre, **estilos_panel())
-        tarjeta.grid(row=0, column=columna, sticky="ew", padx=4, pady=5)
-        ctk.CTkLabel(
+        tarjeta.grid(row=fila, column=columna, sticky="ew", padx=4, pady=5)
+        etiqueta = ctk.CTkLabel(
             tarjeta,
             text=titulo,
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=PALETA["texto_suave"],
-        ).pack(pady=(10, 2))
+            justify="center",
+        )
+        etiqueta.pack(fill="x", padx=8, pady=(10, 2))
+        tarjeta.bind(
+            "<Configure>",
+            lambda evento, label=etiqueta: label.configure(
+                wraplength=max(100, evento.width - 24)
+            ),
+        )
         valor = ctk.CTkLabel(
             tarjeta,
             text="0",
@@ -965,6 +1023,23 @@ class EstadisticasTab(ctk.CTkFrame):
             self.grafico_tendencia,
         ):
             grafico.aplicar_zoom(escala)
+
+    def aplicar_tema(self):
+        for grafico in (
+            self.grafico_productos,
+            self.grafico_tendencia,
+        ):
+            grafico.aplicar_tema()
+        estilizar_treeview(self.tabla_historial_articulo)
+        estilizar_treeview(self.tabla_precios)
+        self.tabla_precios.tag_configure(
+            "aumento", background=color_actual(PALETA["stock_bajo"])
+        )
+        self.tabla_precios.tag_configure(
+            "disminucion",
+            background=color_actual(PALETA["stock_critico"]),
+            foreground=color_actual(PALETA["peligro"]),
+        )
 
     @staticmethod
     def formatear_pesos(valor):
