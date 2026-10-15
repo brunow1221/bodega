@@ -12,6 +12,7 @@ from utils.importador_precios import (
     preparar_actualizaciones_precios,
 )
 import threading
+from config import DIRECTORIO_FACTURAS_NAS
 from utils.ui_theme import (
     PALETA,
     color_estado,
@@ -20,6 +21,7 @@ from utils.ui_theme import (
     estilos_panel,
     estilizar_treeview,
 )
+from views.ventana_facturas import VentanaFacturasProducto
 
 
 def normalizar_clasificacion(texto):
@@ -205,6 +207,15 @@ class InventarioTab(ctk.CTkFrame):
             command=self.exportar_a_excel
         )
         self.btn_excel.pack(side="left", fill="x", expand=True, padx=5)
+
+        self.btn_facturas = ctk.CTkButton(
+            fila_archivos,
+            text="Facturas",
+            **estilos_boton("secundario"),
+            width=120,
+            command=self.abrir_facturas_producto,
+        )
+        self.btn_facturas.pack(side="left", fill="x", expand=True, padx=5)
 
         self.btn_importar_precios = None
         if not any((
@@ -1537,6 +1548,31 @@ class InventarioTab(ctk.CTkFrame):
 
         valor_metros = valor * factores_metros[unidad_origen]
         return valor_metros / factores_metros[unidad_destino]
+
+    # ============================================================
+    # FACTURAS DOCUMENTALES
+    # ============================================================
+    def abrir_facturas_producto(self):
+        seleccion = self.tabla_inventario.selection()
+        if not seleccion:
+            return messagebox.showwarning(
+                "Facturas",
+                "Seleccione un producto para consultar sus facturas."
+            )
+
+        item = self.tabla_inventario.item(seleccion[0])
+        producto = {
+            "id": item["values"][0],
+            "codigo_barras": item["values"][1],
+            "nombre": item["values"][2],
+        }
+
+        VentanaFacturasProducto(
+            self,
+            self.db,
+            producto,
+            DIRECTORIO_FACTURAS_NAS,
+        )
 
     # ============================================================
     # RESTAURAR

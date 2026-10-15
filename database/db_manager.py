@@ -422,6 +422,49 @@ class DatabaseManager:
             return {}
 
     # ============================================================
+    # FACTURAS DE COMPRA (ARCHIVO DOCUMENTAL, NO MODIFICA STOCK)
+    # ============================================================
+    def registrar_factura_compra(self, factura, items):
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            return False, mensaje, None
+
+        try:
+            respuesta = self._ejecutar_con_reintentos(
+                lambda: self.supabase.rpc(
+                    "registrar_factura_compra_app",
+                    {
+                        "p_token": self.session_token,
+                        "p_request_id": str(uuid4()),
+                        "p_factura": factura,
+                        "p_items": items,
+                    },
+                ).execute()
+            )
+            datos = respuesta.data
+            if isinstance(datos, list):
+                datos = datos[0] if datos else None
+            return True, "Factura registrada correctamente.", datos
+        except Exception as error:
+            return False, self._mensaje_error(error), None
+
+    def listar_facturas_producto(self, producto_id):
+        sesion_ok, mensaje = self._requiere_sesion()
+        if not sesion_ok:
+            raise RuntimeError(mensaje)
+
+        respuesta = self._ejecutar_con_reintentos(
+            lambda: self.supabase.rpc(
+                "listar_facturas_producto_app",
+                {
+                    "p_token": self.session_token,
+                    "p_producto_id": str(producto_id),
+                },
+            ).execute()
+        )
+        return list(respuesta.data or [])
+
+    # ============================================================
     # BODEGAS / RACKS / UBICACIONES
     # ============================================================
     def cargar_bodegas(self):

@@ -54,6 +54,10 @@ KEY_SUPABASE = _obtener_configuracion(
     SUPABASE_PUBLISHABLE_KEY_PREDETERMINADA,
 )
 
+# Carpeta compartida donde se guardan los PDF e imágenes de facturas.
+# Puede ser una ruta UNC (\\NAS\Bodega\Facturas) o una unidad de red.
+DIRECTORIO_FACTURAS_NAS = os.environ.get("FACTURAS_NAS_DIR", "").strip()
+
 VERIFICAR_ACTUALIZACIONES = (
     os.environ.get("VERIFICAR_ACTUALIZACIONES", "0").strip().lower()
     in {"1", "true", "yes", "si"}

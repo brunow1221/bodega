@@ -44,7 +44,22 @@ database/migrations/009_editar_cantidad_producto.sql
 database/migrations/010_bodega_exterior_sectores_especiales.sql
 database/migrations/011_separar_cafeteria_aseo.sql
 database/migrations/012_historial_cambios_precio.sql
+database/migrations/013_pgp_contenedores.sql
+database/migrations/014_fecha_termino_proyecto.sql
+database/migrations/015_herramientas_personales.sql
+database/migrations/016_ampliar_pgp.sql
+database/migrations/017_facturas_documentales.sql
 ```
+
+Para usar el archivo documental de facturas, configure además una carpeta
+compartida del NAS accesible desde todos los equipos que ejecuten la aplicación:
+
+```powershell
+$env:FACTURAS_NAS_DIR = "\\NOMBRE-NAS\Bodega\Facturas"
+```
+
+La aplicación organiza los archivos por año y mes. Registrar una factura no
+modifica el stock ni el precio vigente del producto.
 
 La llave `SUPABASE_SERVICE_ROLE_KEY` solo se usa para scripts administrativos
 locales. No debe guardarse en GitHub.
